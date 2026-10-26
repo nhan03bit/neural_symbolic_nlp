@@ -19,9 +19,19 @@
  *
  * Both yield `EpochResult` during training and a final `TrainResult` with predictions.
  */
-import type { MultiLayerWeights, SingleLayerWeights, SavedNetwork } from "./serialize";
+import { mulberry32 } from "../../server/lib/rng.js";
+import type {
+  MultiLayerWeights,
+  SingleLayerWeights,
+  SavedNetwork,
+} from "./serialize";
 
-const XOR_INPUTS = [[0,0], [0,1], [1,0], [1,1]];
+const XOR_INPUTS = [
+  [0, 0],
+  [0, 1],
+  [1, 0],
+  [1, 1],
+];
 const XOR_TARGETS = [0, 1, 1, 0];
 
 /**
@@ -46,24 +56,28 @@ function sigmoidDeriv(s: number): number {
   return s * (1 - s);
 }
 
-/** Random weight in [-1, 1]. Networks are initialized with random weights before training. */
-function randWeight(): number {
-  return Math.random() * 2 - 1;
+/**
+ * Returns a generator of random weights in [-1, 1]. Networks are initialized with random
+ * weights before training; seeding makes a run reproducible, and changing the seed shows
+ * how the same data and architecture can end in different weights.
+ */
+function makeRandWeight(seed: number): () => number {
+  const rand = mulberry32(seed);
+  return () => rand() * 2 - 1;
 }
 
 /** Yields to the event loop so SSE events can flush during long training loops. */
-const tick = () => new Promise(resole => setTimeout(resole, 0));
+const tick = () => new Promise((resole) => setTimeout(resole, 0));
 
-export type EpochResult = { epoch: number; loss: number; }
-export type Prediction = { input: number[]; expected: number; actual: number }
+export type EpochResult = { epoch: number; loss: number };
+export type Prediction = { input: number[]; expected: number; actual: number };
 
 export type TrainResult = {
   architecture: string;
   predictions: Prediction[];
   verdict: string;
   weights: SavedNetwork;
-}
-
+};
 
 /**
  * Trains a single-layer perceptron on XOR. This will FAIL.
@@ -77,13 +91,17 @@ export type TrainResult = {
  *
  * Yields `EpochResult` at ~50 intervals during training, then a final `TrainResult`.
  */
-export async function* trainSingleLayer(epochs: number): AsyncGenerator<EpochResult | TrainResult> {
+export async function* trainSingleLayer(
+  epochs: number,
+  seed = 42,
+): AsyncGenerator<EpochResult | TrainResult> {
+  const randWeight = makeRandWeight(seed);
   let w1 = randWeight();
   let w2 = randWeight();
   let bias = 0;
   const lr = 1.0;
 
-  const step =  Math.max(1, Math.floor(epochs / 50));
+  const step = Math.max(1, Math.floor(epochs / 50));
 
   for (let epoch = 0; epoch <= epochs; epoch++) {
     let totalLoss = 0;
@@ -113,10 +131,13 @@ export async function* trainSingleLayer(epochs: number): AsyncGenerator<EpochRes
   const predictions: Prediction[] = XOR_INPUTS.map((input, i) => ({
     input,
     expected: XOR_TARGETS[i],
-    actual: Math.round(sigmoid(input[0] * w1 + input[1] * w2 + bias) * 100) / 100
+    actual:
+      Math.round(sigmoid(input[0] * w1 + input[1] * w2 + bias) * 100) / 100,
   }));
-  
-  const success = predictions.every(p => Math.abs(p.actual - p.expected) < 0.1);
+
+  const success = predictions.every(
+    (p) => Math.abs(p.actual - p.expected) < 0.1,
+  );
 
   yield {
     architecture: "Single-Layer Perceptron (2 -> 1)",
@@ -145,12 +166,18 @@ export async function* trainSingleLayer(epochs: number): AsyncGenerator<EpochRes
  *
  * Yields `EpochResult` at ~50 intervals, then a final `TrainResult` with predictions.
  */
-export async function* trainMultiLayer(epochs: number): AsyncGenerator<EpochResult | TrainResult> {
+export async function* trainMultiLayer(
+  epochs: number,
+  seed = 42,
+): AsyncGenerator<EpochResult | TrainResult> {
   const HIDDEN = 4;
   const lr = 1.0;
+  const randWeight = makeRandWeight(seed);
 
   // Layer 1 Weights: input(2) -> hidden(4)
-  const w1: number[][] = Array.from({ length: 2}, () => Array.from({ length: HIDDEN }, () => randWeight()));
+  const w1: number[][] = Array.from({ length: 2 }, () =>
+    Array.from({ length: HIDDEN }, () => randWeight()),
+  );
   const b1: number[] = Array.from<number>({ length: HIDDEN }).fill(0);
 
   // Layer 2 Weights: hidden(4) -> output(1)
@@ -162,7 +189,7 @@ export async function* trainMultiLayer(epochs: number): AsyncGenerator<EpochResu
   for (let epoch = 0; epoch <= epochs; epoch++) {
     let totalLoss = 0;
 
-    for (let i = 0; i < HIDDEN; i++) {
+    for (let i = 0; i < XOR_INPUTS.length; i++) {
       const [x1, x2] = XOR_INPUTS[i];
       const target = XOR_TARGETS[i];
 
@@ -236,7 +263,9 @@ export async function* trainMultiLayer(epochs: number): AsyncGenerator<EpochResu
   });
 
   // The network must give a close prediction for every XOR case
-  const success = predictions.every(p => Math.abs(p.actual - p.expected) < 0.1);
+  const success = predictions.every(
+    (p) => Math.abs(p.actual - p.expected) < 0.1,
+  );
 
   yield {
     architecture: "Multi-Layer Network (2 -> 4 -> 1)",

@@ -1,0 +1,15 @@
+boy
+cat
+dog
+elephant
+girl
+he
+his
+king
+kitten
+man
+prince
+puppy
+queen
+tiger
+woman

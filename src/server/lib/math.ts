@@ -21,5 +21,6 @@ export function cosineSimilarity(a: number[], b: number[]): number {
     magB += b[i] * b[i];
   }
 
-  return dot / (Math.sqrt(magA) * Math.sqrt(magB));
+  const denom = Math.sqrt(magA) * Math.sqrt(magB);
+  return denom === 0 ? 0 : dot / denom;
 }

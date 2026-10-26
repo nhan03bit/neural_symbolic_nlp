@@ -219,7 +219,10 @@ export const STORIES = [
 ];
 
 const BPE_MERGE_COUNT = 500;
-const { merges } = trainBpeOnText(CORPUS.join("".toLowerCase()), BPE_MERGE_COUNT);
+const { merges } = trainBpeOnText(
+  CORPUS.join(" ").toLowerCase(),
+  BPE_MERGE_COUNT,
+);
 export const BPE_MERGES = merges;
 
 /** Pre-trained BPE merge table — computed once at import time from the full corpus. */

@@ -12,24 +12,30 @@
 const MAX_MERGES = 1000; // limit the number of merges to avoid excessive computation
 
 /**
- * Regex that splits text into words, spaces, and punctuation — just like real
- * tokenizers do before BPE runs.
+ * Regex that splits text into words and punctuation — just like real tokenizers
+ * do before BPE runs. Whitespace only separates pre-tokens and is not kept, so the
+ * vocabulary holds words, not spaces. A caller that needs spaces as part of the
+ * tokens (the transformer) passes its own regex, such as `/\s\w+|[^\w\s]/g`.
  *
  * Real tokenizers (GPT-2, GPT-4) use a pre-tokenization regex to split text
  * into coarse chunks first. BPE then operates *within* each chunk, never across
  * them. This is what prevents cross-word merges like "cat sat" becoming one token.
  *
- * Our pattern splits into: word characters, individual spaces, or individual punctuation.
+ * Our pattern splits into: runs of word characters, or individual punctuation marks.
  *
  * @example
  * "the cat sat!".match(PRE_TOKEN_RE)
- * // => ["the", " ", "cat", " ", "sat", "!"]
+ * // => ["the", "cat", "sat", "!"]
  * // BPE will learn merges inside "the", "cat", "sat" independently.
- * // It can never merge "cat" + " " because they're in separate chunks.
+ * // It can never merge "cat" + "sat" because they're in separate chunks.
  */
 export const PRE_TOKEN_RE = /[\w]+|[^\s\w]/g;
 
-export type Merge = { pair: [string, string]; merged: string; frequency: number };
+export type Merge = {
+  pair: [string, string];
+  merged: string;
+  frequency: number;
+};
 
 /**
  * Splits raw text into pre-tokens (words, spaces, punctuation) and counts how
@@ -47,7 +53,10 @@ export type Merge = { pair: [string, string]; merged: string; frequency: number 
  * // "the" appears twice, so pairs inside it ("t"+"h", "h"+"e") each get weight 2.
  * // We only process 4 unique words instead of 9 tokens.
  */
-export function countWords(text: string, regex: RegExp = PRE_TOKEN_RE): Map<string, number> {
+export function countWords(
+  text: string,
+  regex: RegExp = PRE_TOKEN_RE,
+): Map<string, number> {
   const counts = new Map<string, number>();
   const matches = text.match(regex);
 
@@ -73,12 +82,20 @@ export function countWords(text: string, regex: RegExp = PRE_TOKEN_RE): Map<stri
  * // => ["ca", "t", "s"]
  * // The "c"+"a" pair is merged into "ca". Next round might merge "ca"+"t" => "cat".
  */
-export function mergeTokens(tokens: string[], pair: [string, string], merged: string): string[] {
+export function mergeTokens(
+  tokens: string[],
+  pair: [string, string],
+  merged: string,
+): string[] {
   const result: string[] = [];
   let i = 0;
 
   while (i < tokens.length) {
-    if (i < tokens.length -1 && tokens[i] === pair[0] && tokens[i + 1] === pair[1]) {
+    if (
+      i < tokens.length - 1 &&
+      tokens[i] === pair[0] &&
+      tokens[i + 1] === pair[1]
+    ) {
       result.push(merged);
       i += 2; // skip the next token since it's part of the merged pair
     } else {
@@ -119,7 +136,10 @@ export function mergeTokens(tokens: string[], pair: [string, string], merged: st
  * //   "cat" => ["cat"], "car" => ["car"]
  * // No pairs left — every word is a single token. Training complete.
  */
-export function trainBpe(wordFreqs: Map<string, number>, maxMerges: number = MAX_MERGES): { merges: Merge[]; wordSplits: Map<string, string[]> } {
+export function trainBpe(
+  wordFreqs: Map<string, number>,
+  maxMerges: number = MAX_MERGES,
+): { merges: Merge[]; wordSplits: Map<string, string[]> } {
   const wordSplits = new Map<string, string[]>();
   for (const word of wordFreqs.keys()) {
     wordSplits.set(word, [...word]); // split each word into characters
@@ -137,7 +157,7 @@ export function trainBpe(wordFreqs: Map<string, number>, maxMerges: number = MAX
       }
     }
 
-     if (pairFreq.size === 0) break; // no more pairs to merge
+    if (pairFreq.size === 0) break; // no more pairs to merge
 
     // Find the most frequent pair
     let bestKey = "";
@@ -189,14 +209,18 @@ export function trainBpe(wordFreqs: Map<string, number>, maxMerges: number = MAX
  * // "cat": ["c","a","t"] => ["ca","t"] => ["cat"]
  * // => ["a", " ", "cat"]
  */
-export function applyMerges(text: string, merges: Merge[], regex: RegExp = PRE_TOKEN_RE): string[] {
+export function applyMerges(
+  text: string,
+  merges: Merge[],
+  regex: RegExp = PRE_TOKEN_RE,
+): string[] {
   const preTokens = text.match(regex) || [];
   const result: string[] = [];
 
   for (const preToken of preTokens) {
     let tokens = [...preToken]; // split pre-token into characters
 
-    for(const { pair, merged } of merges) {
+    for (const { pair, merged } of merges) {
       tokens = mergeTokens(tokens, pair, merged);
     }
 
@@ -207,6 +231,10 @@ export function applyMerges(text: string, merges: Merge[], regex: RegExp = PRE_T
 }
 
 /** Convenience: train BPE directly on a text string. */
-export function trainBpeOnText(text: string, maxMerges?: number, regex?: RegExp) {
+export function trainBpeOnText(
+  text: string,
+  maxMerges?: number,
+  regex?: RegExp,
+) {
   return trainBpe(countWords(text, regex), maxMerges);
 }

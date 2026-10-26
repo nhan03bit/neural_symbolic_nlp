@@ -1,96 +1,45 @@
-# Build an LLM From Scratch — Tutorial
+# Neural-Symbolic NLP: rebuilding a small transformer, and what it cannot reason about
 
-You are rebuilding [w3cj/how-llms-work](https://github.com/w3cj/how-llms-work) by hand: an app that walks every stage of the LLM pipeline, from pattern matching to training a GPT-style transformer, with **no ML libraries**.
+A from-scratch TypeScript pipeline (Bun, Hono, Vite; no ML libraries) that rebuilds the road to a GPT-style model: ELIZA → BPE → XOR network → Word2Vec → decoder-only transformer. The point of the exercise is a gap it exposes.
 
-This tutorial gives you **TODOs, hints and checkpoints — not solutions.** You write every line.
+**The gap.** A transformer is trained from random weights to minimise next-token loss. Nothing in that objective represents *why* an output is right, so the model fits plausible text and cannot account for it. The author's study note says it directly: the model guesses "the best weight to achieve 'Target Error' But lack[s] the Critical Reasoning to its own". The report asks what a *feasible* neuro-symbolic extension of this small model looks like, using the taxonomy of Sheth, Roy and Gaur (2023).
 
-## The pipeline you're building
+## Status
 
-```
- "the cat sat"                                   Stage 0: ELIZA — the "before" picture:
-      │                                          no learning, just if-statements
-      ▼
- ┌──────────────┐  Stage 1: BPE tokenizer        text → subword tokens → integer IDs
- │  Tokenizer   │  (Sennrich 2016)
- └──────┬───────┘
-        ▼
- ┌──────────────┐  Stage 2: XOR neural net       how ANY network learns:
- │  Learning    │  (Rumelhart 1986, Glorot 2010) forward → loss → backprop → update
- └──────┬───────┘
-        ▼
- ┌──────────────┐  Stage 3: Word2Vec Skip-gram   token IDs → vectors that capture meaning
- │  Embeddings  │  (Mikolov 2013a/b)
- └──────┬───────┘
-        ▼
- ┌──────────────┐  Stage 4: GPT transformer      attention + layer norm + FFN, trained
- │ Transformer  │  (Vaswani 2017, Ba 2016,       with Adam to predict the next token
- │              │   Kingma 2014, Radford 2018)
- └──────┬───────┘
-        ▼
- ┌──────────────┐  Stage 4j: sampling            logits → temperature → top-p → next token
- │  Sampling    │  (Holtzman 2019)
- └──────────────┘
-```
-
-## Files in this folder
-
-| File | What it's for |
+| Stage | State |
 |---|---|
-| [PROGRESS.md](docs/tutorial/PROGRESS.md) | Your checklist. Tick boxes as you go; the tutor reads it. |
-| [RESEARCH.md](docs/tutorial/RESEARCH.md) | The 11 papers behind this project: key idea, where it appears in the code, what to read. |
-| [00-setup-and-eliza.md](docs/tutorial/00-setup-and-eliza.md) | Recap of what you've built + housekeeping. |
-| [01-bpe-tokenizer.md](docs/tutorial/01-bpe-tokenizer.md) | Byte Pair Encoding from scratch. |
-| [02-xor-neural-net.md](docs/tutorial/02-xor-neural-net.md) | Perceptron vs. multi-layer net + backprop. |
-| [03-word-embeddings.md](docs/tutorial/03-word-embeddings.md) | Word2Vec Skip-gram with negative sampling. |
-| [04-transformer.md](docs/tutorial/04-transformer.md) | Decoder-only transformer, backward pass, Adam, sampling. |
+| 0 ELIZA, 1 BPE | Works |
+| 2 XOR network | Works, seeded; 4 seeds reach the same function through unrelated weights |
+| 3 Word2Vec | **Repaired** (all cosines were 1.0). Now king/queen 0.90, king−man+woman→queen |
+| 4 Transformer | **In progress**, hand-written; does not type-check yet |
+| Symbolic layer | **Designed, not implemented** |
+| Experiments E1–E3 | **Not run**; no results are claimed |
 
-## Using the tutor agent
+Only stages 2 and 3 have measured results in the report.
 
-The agent lives in `.claude/agents/llm-tutor.md`. The quickest way to use it is the `/tutor` skill (`.claude/skills/tutor/SKILL.md`), which runs the agent with your PROGRESS.md and source tree already loaded:
+## The report
 
-```
-/tutor
-/tutor more hint
-/tutor stuck
-/tutor check src/server/lib/bpe.ts
-/tutor explain why we divide by sqrt(d_k)
-```
+Read it in [`docs/progress/`](docs/progress/README.md):
 
-You can also mention the agent directly:
+1. [Background: stages 0–3, with measurements and the Word2Vec failure](docs/progress/01-background.md)
+2. [The transformer and self-attention](docs/progress/02-transformer-self-attention.md)
+3. [The reasoning gap](docs/progress/03-reasoning-gap.md)
+4. [A neuro-symbolic design for this model](docs/progress/04-neurosymbolic-design.md)
+5. [Implementation and evaluation](docs/progress/05-implementation-and-evaluation.md)
+6. [Conclusion and future work](docs/progress/06-conclusion-and-future-work.md)
+7. [References](docs/progress/references.md)
 
-```
-@llm-tutor what's next?
-@llm-tutor I'm stuck on trainBpe — more hint
-@llm-tutor check my code in src/server/lib/bpe.ts
-@llm-tutor explain why we divide by sqrt(d_k)
-```
-
-It reads `PROGRESS.md` and your `src/`, then answers with **📍 Where you are → ✅ Next TODOs → 💡 Hint → 📚 Research → 🧪 How to verify**.
-
-### The hint ladder
-
-| Tier | You get | Ask with |
-|---|---|---|
-| 1 | Concept + a guiding question | (default) |
-| 2 | Pseudocode / equations | "more hint", "tier 2" |
-| 3 | Signature + skeleton with `// TODO` bodies | "stuck", "tier 3" |
-| after 3 | It walks through *your* code with a concrete input until you find the bug | — |
-
-It will **never** write a full function for you. That's the point.
-
-## Ground rules for yourself
-
-1. **The UI types are the spec.** Every `src/client/components/*-result/index.tsx` exports the exact shapes your server must emit (`BpeInit`, `MergeStep`, `BpeResult`, …). Read them first.
-2. **Run a checkpoint before moving on.** Each step has one.
-3. **Read the paper section after you finish the step**, not before. It will make much more sense.
-4. **Compare with the reference only after a stage is done.**
+The source papers and the study note are in [`docs/paper/`](docs/paper/).
 
 ## Running
 
 ```bash
 bun install
-bun run dev          # http://localhost:5173
-bunx tsc -b --noEmit # type-check
+bun run dev                          # http://localhost:5173
+bun test tests/train-embed.test.ts   # Word2Vec sanity tests
+bun tests/probe-xor.ts               # XOR across seeds
+bun tests/probe-embed.ts 300         # Skip-gram, about 6 s
+bunx tsc -b --noEmit                 # type-check
 ```
 
 Watch raw SSE from a route:
@@ -98,3 +47,7 @@ Watch raw SSE from a route:
 ```bash
 curl -N -X POST localhost:5173/bpe-tokenize -H 'content-type: application/json' -d '{"message":"low lower lowest"}'
 ```
+
+## Credit
+
+Architecture follows [w3cj/how-llms-work](https://github.com/w3cj/how-llms-work). That repository has no licence file, so no code was copied and it is used only as a design cross-check. It has no symbolic component; the neuro-symbolic layer here is original.

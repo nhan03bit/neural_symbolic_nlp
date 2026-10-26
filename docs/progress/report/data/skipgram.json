@@ -1,0 +1,238 @@
+{
+  "epochs": 300,
+  "init": {
+    "vocabSize": 191,
+    "embeddingDim": 32,
+    "sentenceCount": 107,
+    "windowSize": 2,
+    "totalPairs": 1878
+  },
+  "finalLoss": {
+    "1": 1.260716,
+    "2": 1.266381,
+    "3": 1.243739,
+    "42": 1.270689
+  },
+  "firstLoss": {
+    "1": 4.080289,
+    "2": 4.067855,
+    "3": 4.078024,
+    "42": 4.074166
+  },
+  "pairCosines": {
+    "1": {
+      "king|queen": 0.8756,
+      "man|woman": 0.9163,
+      "cat|dog": 0.7268,
+      "cat|king": 0.471,
+      "tiger|elephant": 0.9019
+    },
+    "2": {
+      "king|queen": 0.8858,
+      "man|woman": 0.9132,
+      "cat|dog": 0.6966,
+      "cat|king": 0.5577,
+      "tiger|elephant": 0.9022
+    },
+    "3": {
+      "king|queen": 0.8775,
+      "man|woman": 0.9107,
+      "cat|dog": 0.6978,
+      "cat|king": 0.4676,
+      "tiger|elephant": 0.8992
+    },
+    "42": {
+      "king|queen": 0.8972,
+      "man|woman": 0.9198,
+      "cat|dog": 0.7192,
+      "cat|king": 0.4655,
+      "tiger|elephant": 0.8956
+    }
+  },
+  "pairwiseGeometryPearson": {
+    "42-1": 0.9780059710098759,
+    "42-2": 0.98439053763485,
+    "42-3": 0.9805058138793495,
+    "1-2": 0.9770147178370745,
+    "1-3": 0.9824895090597264,
+    "2-3": 0.9820231258983889
+  },
+  "meanSameWordCosineAcrossSeeds": {
+    "42-1": -0.0816691742531644,
+    "42-2": -0.2768701940647522,
+    "42-3": 0.09155597608740944,
+    "1-2": 0.04099582331666945,
+    "1-3": -0.12640398617589813,
+    "2-3": -0.1336548127015843
+  },
+  "analogies": [
+    {
+      "seed": 42,
+      "correct": 6,
+      "total": 7,
+      "results": [
+        {
+          "query": "king - man + woman",
+          "result": "queen",
+          "score": 0.73
+        },
+        {
+          "query": "queen - woman + man",
+          "result": "king",
+          "score": 0.77
+        },
+        {
+          "query": "prince - boy + girl",
+          "result": "princess",
+          "score": 0.95
+        },
+        {
+          "query": "kitten - cat + dog",
+          "result": "lion",
+          "score": 0.85
+        },
+        {
+          "query": "puppy - dog + cat",
+          "result": "kitten",
+          "score": 0.72
+        },
+        {
+          "query": "he - man + woman",
+          "result": "she",
+          "score": 0.71
+        },
+        {
+          "query": "his - man + woman",
+          "result": "her",
+          "score": 0.82
+        }
+      ]
+    },
+    {
+      "seed": 1,
+      "correct": 5,
+      "total": 7,
+      "results": [
+        {
+          "query": "king - man + woman",
+          "result": "queen",
+          "score": 0.71
+        },
+        {
+          "query": "queen - woman + man",
+          "result": "king",
+          "score": 0.75
+        },
+        {
+          "query": "prince - boy + girl",
+          "result": "princess",
+          "score": 0.93
+        },
+        {
+          "query": "kitten - cat + dog",
+          "result": "lion",
+          "score": 0.86
+        },
+        {
+          "query": "puppy - dog + cat",
+          "result": "kitten",
+          "score": 0.73
+        },
+        {
+          "query": "he - man + woman",
+          "result": "home",
+          "score": 0.7
+        },
+        {
+          "query": "his - man + woman",
+          "result": "her",
+          "score": 0.82
+        }
+      ]
+    },
+    {
+      "seed": 2,
+      "correct": 5,
+      "total": 7,
+      "results": [
+        {
+          "query": "king - man + woman",
+          "result": "queen",
+          "score": 0.72
+        },
+        {
+          "query": "queen - woman + man",
+          "result": "king",
+          "score": 0.76
+        },
+        {
+          "query": "prince - boy + girl",
+          "result": "princess",
+          "score": 0.93
+        },
+        {
+          "query": "kitten - cat + dog",
+          "result": "lion",
+          "score": 0.81
+        },
+        {
+          "query": "puppy - dog + cat",
+          "result": "kitten",
+          "score": 0.73
+        },
+        {
+          "query": "he - man + woman",
+          "result": "she",
+          "score": 0.73
+        },
+        {
+          "query": "his - man + woman",
+          "result": "father",
+          "score": 0.75
+        }
+      ]
+    },
+    {
+      "seed": 3,
+      "correct": 6,
+      "total": 7,
+      "results": [
+        {
+          "query": "king - man + woman",
+          "result": "queen",
+          "score": 0.7
+        },
+        {
+          "query": "queen - woman + man",
+          "result": "king",
+          "score": 0.74
+        },
+        {
+          "query": "prince - boy + girl",
+          "result": "princess",
+          "score": 0.93
+        },
+        {
+          "query": "kitten - cat + dog",
+          "result": "lion",
+          "score": 0.85
+        },
+        {
+          "query": "puppy - dog + cat",
+          "result": "kitten",
+          "score": 0.73
+        },
+        {
+          "query": "he - man + woman",
+          "result": "she",
+          "score": 0.79
+        },
+        {
+          "query": "his - man + woman",
+          "result": "her",
+          "score": 0.74
+        }
+      ]
+    }
+  ]
+}

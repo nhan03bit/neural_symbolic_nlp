@@ -15,7 +15,9 @@
     "@knadh/oat": "^0.8.0",
     "@w3cj/ruta": "^1.1.2",
     "clsx": "^2.1.1",
-    "hono": "^4.13.11"
+    "hono": "^4.13.11",
+    "test": "^3.3.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -1,0 +1,5 @@
+{
+  "note": "Analytic count from the block definition; the transformer is not trained.",
+  "D32_F128_perBlock": 12704,
+  "D64_F256_perBlock": 49984
+}

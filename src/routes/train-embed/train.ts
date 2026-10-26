@@ -17,21 +17,12 @@
  * Yields InitResult, then EpochResults during training, then a final TrainEmbedResult.
  */
 import { writeFile } from "node:fs/promises";
-import { applyMerges } from "../../server/lib/bpe";
+import { applyMerges } from "../../server/lib/bpe.js";
 import { cosineSimilarity } from "../../server/lib/math.js";
+import { mulberry32 } from "../../server/lib/rng.js";
 import { BPE_MERGES, buildVocab, CORPUS, tokenize } from "./corpus.js";
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
-
-// Mulberry32 — fast, seedable 32-bit PRNG
-function nullberry32(seed: number): () => number {
-  return () => {
-    seed |= 0;
-    seed = (seed + 0x6d2b79f5) | 0;
-    const t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 function sigmoid(x: number): number {
   if (x > 6) return 1;
@@ -41,6 +32,7 @@ function sigmoid(x: number): number {
 
 export type InitResult = {
   vocabSize: number;
+  embeddingDim: number;
   sentenceCount: number;
   windowSize: number;
   totalPairs: number;
@@ -53,13 +45,13 @@ export type Neighbor = {
   nearest: { word: string; score: number }[];
 };
 export type SimilarityPair = { a: string; b: string; score: number };
-export type Anology = { query: string; result: string; score: number };
+export type Analogy = { query: string; result: string; score: number };
 
 export type TrainEmbedResult = {
   embeddings: WordEmbedding[];
   neighbors: Neighbor[];
-  similiarities: SimilarityPair[];
-  analogies: Anology[];
+  similarities: SimilarityPair[];
+  analogies: Analogy[];
   warnings: string[];
 };
 
@@ -69,6 +61,10 @@ type TrainOpts = {
   dimensions: number;
   windowSize: number;
   negativeSamples: number;
+  /** Write the trained embeddings to `.data/`. Defaults to true; tests turn it off. */
+  save?: boolean;
+  /** Seeds init, shuffling and negative sampling. Defaults to 42. */
+  seed?: number;
 };
 
 export async function* trainSkipGram(
@@ -77,7 +73,7 @@ export async function* trainSkipGram(
   const { words, epochs, dimensions: dim, windowSize, negativeSamples } = opts;
   const { wordToIndex, indexToWord, freq } = buildVocab(CORPUS);
   const vocabSize = indexToWord.length;
-  const rand = nullberry32(42);
+  const rand = mulberry32(opts.seed ?? 42);
 
   // Build training pairs: (target, context) indices
   const pairs: [number, number][] = [];
@@ -100,6 +96,7 @@ export async function* trainSkipGram(
 
   yield {
     vocabSize,
+    embeddingDim: dim,
     sentenceCount: CORPUS.length,
     windowSize,
     totalPairs: pairs.length,
@@ -118,10 +115,10 @@ export async function* trainSkipGram(
     unigramPower[i] /= unigramSum;
   }
 
-  // Build alias table for O(1) negative sampling
+  // Cumulative distribution for negative sampling (binary-searched in sampleNegative)
   const cumulative = new Float64Array(vocabSize);
   cumulative[0] = unigramPower[0];
-  for (let i = 0; i < vocabSize; i++) {
+  for (let i = 1; i < vocabSize; i++) {
     cumulative[i] = cumulative[i - 1] + unigramPower[i];
   }
 
@@ -167,14 +164,30 @@ export async function* trainSkipGram(
 
     for (const [target, context] of pairs) {
       const tOff = target * dim;
-      const nOff = context * dim;
+      const cOff = context * dim;
 
-      // Possitive samples: push target and random words part
+      // Positive sample: pull the target and its true context together
+      let dot = 0;
+      for (let d = 0; d < dim; d++) dot += wIn[tOff + d] * wOut[cOff + d];
+
+      const score = sigmoid(dot);
+      const grad = lr * (1 - score);
+
+      for (let d = 0; d < dim; d++) {
+        const wInD = wIn[tOff + d];
+        wIn[tOff + d] += grad * wOut[cOff + d];
+        wOut[cOff + d] += grad * wInD;
+      }
+
+      totalLoss += -Math.log(score + 1e-10);
+
+      // Negative samples: push the target away from random words
       for (let n = 0; n < negativeSamples; n++) {
         const neg = sampleNegative();
         if (neg === context) continue;
 
-        let nDot = neg * dim;
+        const nOff = neg * dim;
+        let nDot = 0;
         for (let d = 0; d < dim; d++) nDot += wIn[tOff + d] * wOut[nOff + d];
 
         const nScore = sigmoid(nDot);
@@ -249,10 +262,10 @@ export async function* trainSkipGram(
   });
 
   // Parwise similarity between querry words
-  const similiarities: SimilarityPair[] = [];
+  const similarities: SimilarityPair[] = [];
   for (let i = 0; i < queryIndicies.length; i++) {
     for (let j = i + 1; j < queryIndicies.length; j++) {
-      similiarities.push({
+      similarities.push({
         a: indexToWord[queryIndicies[i]],
         b: indexToWord[queryIndicies[j]],
         score:
@@ -277,7 +290,7 @@ export async function* trainSkipGram(
     ["his", "man", "woman"],
   ];
 
-  const analogies: Anology[] = [];
+  const analogies: Analogy[] = [];
   for (const [a, b, c] of ANALOGIES) {
     const aIdx = wordToIndex.get(a);
     const bIdx = wordToIndex.get(b);
@@ -289,7 +302,7 @@ export async function* trainSkipGram(
     const resultVector: number[] = [];
     for (let d = 0; d < dim; d++) {
       resultVector.push(
-        wIn[aIdx * dim + d] - wIn[bIdx * dim + d] - wIn[cIdx * dim + d],
+        wIn[aIdx * dim + d] - wIn[bIdx * dim + d] + wIn[cIdx * dim + d],
       );
     }
 
@@ -326,11 +339,13 @@ export async function* trainSkipGram(
     ),
   };
 
-  const weightsPath = new URL(
-    "../../../.data/embedding-weights.json",
-    import.meta.url,
-  );
-  await writeFile(weightsPath, `${JSON.stringify(savedModel, null, 2)}\n`);
+  if (opts.save !== false) {
+    const weightsPath = new URL(
+      "../../../.data/embedding-weights.json",
+      import.meta.url,
+    );
+    await writeFile(weightsPath, `${JSON.stringify(savedModel, null, 2)}\n`);
+  }
 
-  yield { embeddings, neighbors, similiarities, analogies, warnings };
+  yield { embeddings, neighbors, similarities, analogies, warnings };
 }
