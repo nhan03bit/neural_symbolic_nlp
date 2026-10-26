@@ -12,7 +12,7 @@ export type MergeStep = {
   step: number;
   pair: [string, string];
   frequency: number;
-  newToken: string;
+  merged: string;
   vocabSize: number;
   tokenCount: number;
 };
@@ -25,7 +25,10 @@ export type BpeResult = {
 };
 
 function displayToken(t: string): string {
-  return t.replaceAll(" ", "\u2423").replaceAll("\n", "\\n").replaceAll("\t", "\\t");
+  return t
+    .replaceAll(" ", "\u2423")
+    .replaceAll("\n", "\\n")
+    .replaceAll("\t", "\\t");
 }
 
 export function BpeTokenizeResult({
@@ -43,19 +46,14 @@ export function BpeTokenizeResult({
         <>
           <details open class={styles.section}>
             <summary class={styles.label}>
-              Pre-tokenized (
-              {init.wordCount}
-              {" "}
-              unique words)
+              Pre-tokenized ({init.wordCount} unique words)
             </summary>
             <pre class={styles.corpus}>{init.corpus}</pre>
           </details>
 
           <details open class={styles.section}>
             <summary class={styles.label}>
-              Characters (
-              {init.charCount}
-              )
+              Characters ({init.charCount})
             </summary>
             <div class={styles.tokens}>
               {init.characters.map((ch, i) => (
@@ -65,10 +63,7 @@ export function BpeTokenizeResult({
               ))}
               {init.charCount > init.characters.length && (
                 <span class={styles.truncated}>
-                  +
-                  {init.charCount - init.characters.length}
-                  {" "}
-                  more
+                  +{init.charCount - init.characters.length} more
                 </span>
               )}
             </div>
@@ -79,33 +74,30 @@ export function BpeTokenizeResult({
       {mergeSteps.length > 0 && (
         <details open class={styles.section}>
           <summary class={styles.label}>
-            Merge Steps (
-            {mergeSteps.length}
-            )
+            Merge Steps ({mergeSteps.length})
           </summary>
           <div class={styles.mergeList}>
             {mergeSteps.map((m, i) => (
               <div key={i} class={styles.mergeRow}>
-                <span class={styles.stepNum}>
-                  {m.step}
-                  .
-                </span>
+                <span class={styles.stepNum}>{m.step}.</span>
                 <span class={styles.pair}>
-                  <span class={styles.pairToken}>{displayToken(m.pair[0])}</span>
+                  <span class={styles.pairToken}>
+                    {displayToken(m.pair[0])}
+                  </span>
                   {" + "}
-                  <span class={styles.pairToken}>{displayToken(m.pair[1])}</span>
+                  <span class={styles.pairToken}>
+                    {displayToken(m.pair[1])}
+                  </span>
                 </span>
                 <span class={styles.arrow}>{"\u2192"}</span>
-                <span class={styles.merged}>{displayToken(m.newToken)}</span>
+                <span class={styles.merged}>{displayToken(m.merged)}</span>
                 <span class={styles.freq}>
                   {"\u00D7"}
                   {m.frequency}
                 </span>
                 <span class={styles.stats}>
                   vocab
-                  {m.vocabSize}
-                  {" "}
-                  | tokens
+                  {m.vocabSize} | tokens
                   {m.tokenCount}
                 </span>
               </div>
@@ -118,13 +110,10 @@ export function BpeTokenizeResult({
         <>
           <details open class={styles.section}>
             <summary class={styles.label}>
-              Vocabulary (
-              {new Set(result.inputTokens).size}
-              {" "}
-              unique tokens)
+              Vocabulary ({new Set(result.inputTokens).size} unique tokens)
             </summary>
             <div class={styles.tokens}>
-              {[...new Set(result.inputTokens)].map(t => (
+              {[...new Set(result.inputTokens)].map((t) => (
                 <span key={t} class={`badge outline ${styles.vocabBadge}`}>
                   {displayToken(t)}
                 </span>
@@ -144,16 +133,8 @@ export function BpeTokenizeResult({
           </details>
 
           <div class={styles.compression}>
-            {result.originalCharCount}
-            {" "}
-            chars
-            {"\u2192"}
-            {" "}
-            {result.tokenCount}
-            {" "}
-            tokens (
-            {result.compressionRatio}
-            {" "}
+            {result.originalCharCount} chars
+            {"\u2192"} {result.tokenCount} tokens ({result.compressionRatio}{" "}
             compression)
           </div>
         </>

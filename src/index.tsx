@@ -5,6 +5,8 @@ import { jsxRenderer } from "hono/jsx-renderer";
 
 import neuralNet from "./routes/neural-net/index";
 import simpleChat from "./routes/simple-chat";
+import bpeTokenize from "./routes/bpe-tokenize";
+import trainEmbed from "./routes/train-embed";
 
 const app = new Hono();
 
@@ -65,7 +67,7 @@ app.notFound((c) =>
   ),
 );
 
-export const _routes = app.route("/", simpleChat).route("/", neuralNet);
+export const _routes = app.route("/", simpleChat).route("/", neuralNet).route("/", bpeTokenize).route("/", trainEmbed);
 
 export type App = typeof _routes;
 export default app;
