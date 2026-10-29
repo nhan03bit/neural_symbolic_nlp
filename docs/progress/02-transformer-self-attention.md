@@ -21,14 +21,14 @@ Q = XW_Q + b_Q,\qquad K = XW_K + b_K,\qquad V = XW_V + b_V \tag{1}
 $$
 
 $$
-\operatorname{Attn}(X) = \operatorname{softmax}\!\left(\frac{QK^{\top}}{\sqrt{d_k}} + M\right)V \tag{2}
+\mathrm{Attn}(X) = \mathrm{softmax}\!\left(\frac{QK^{\top}}{\sqrt{d_k}} + M\right)V \tag{2}
 $$
 
 The softmax runs over each row, so each token's attention weights sum to 1. The $1/\sqrt{d_k}$ factor keeps dot products from growing with the key dimension, which would push the softmax into regions with vanishing gradient. $M$ is the **causal mask**: $M_{ij}=0$ for $j\le i$ and $-\infty$ otherwise, so a token sees only itself and earlier tokens. This is what makes the model decoder-only and lets it train on next-token prediction without peeking at the answer.
 
 ![The causal mask and the resulting attention weights](../images/fig-attn-causal.png)
 
-*Figure 2.1b. Left: the mask $M$. Right: $\operatorname{softmax}(QK^{\top}/\sqrt{d_k}+M)$ for "The cat sat on the mat", computed by `docs/images/make_figures.py` with seeded **random, untrained** weights (numpy, seed 7, $d=8$). It shows the structure only: every row sums to 1 and no token attends to a later one. It is not learned behaviour.*
+*Figure 2.1b. Left: the mask $M$. Right: $\mathrm{softmax}(QK^{\top}/\sqrt{d_k}+M)$ for "The cat sat on the mat", computed by `docs/images/make_figures.py` with seeded **random, untrained** weights (numpy, seed 7, $d=8$). It shows the structure only: every row sums to 1 and no token attends to a later one. It is not learned behaviour.*
 
 ## 2. Polysemy: "bank" (note p2)
 
@@ -45,7 +45,7 @@ This is the capability that separates stage 3 from stage 4. It is also a first i
 The note calls these "Headers" `[sic]` (heads). Different heads can track different relations: adjacent words, long-range links, verb tense, broad context. Formally, split $d$ into $h$ sub-spaces of size $d_k=d/h$, run equation (2) in each, and concatenate:
 
 $$
-\operatorname{MHA}(X)=\big[\operatorname{head}_1;\dots;\operatorname{head}_h\big]W_O + b_O \tag{3}
+\mathrm{MHA}(X)=\big[\mathrm{head}_1;\dots;\mathrm{head}_h\big]W_O + b_O \tag{3}
 $$
 
 ![From heads to a refined token](../images/fig-attn-multihead.png)
@@ -64,12 +64,12 @@ The note describes a **two-layer feed-forward network** that refines each enrich
 
 $$
 \begin{aligned}
-x' &= x + \operatorname{MHA}\big(\operatorname{LN}_1(x)\big)\\
-x'' &= x' + W_2\,\operatorname{ReLU}\!\big(W_1\operatorname{LN}_2(x')+b_1\big)+b_2
+x' &= x + \mathrm{MHA}\big(\mathrm{LN}_1(x)\big)\\
+x'' &= x' + W_2\,\mathrm{ReLU}\!\big(W_1\mathrm{LN}_2(x')+b_1\big)+b_2
 \end{aligned} \tag{4}
 $$
 
-with $\operatorname{LN}(x)=\gamma\odot\frac{x-\mu}{\sqrt{\sigma^2+\epsilon}}+\beta$ (Ba et al., 2016). The residual path lets gradients flow unchanged through depth; pre-LN keeps that path free of normalisation, which is the usual explanation for its stability (Xiong et al., 2020). The original paper placed the norm after each sub-layer (post-LN).
+with $\mathrm{LN}(x)=\gamma\odot\frac{x-\mu}{\sqrt{\sigma^2+\epsilon}}+\beta$ (Ba et al., 2016). The residual path lets gradients flow unchanged through depth; pre-LN keeps that path free of normalisation, which is the usual explanation for its stability (Xiong et al., 2020). The original paper placed the norm after each sub-layer (post-LN).
 
 ![Designed decoder-only block, pre-LN](../images/fig-transformer-block.png)
 
@@ -88,12 +88,12 @@ The note stacks blocks: each takes one vector per token and returns one vector p
 *Equations (added).* The full model:
 
 $$
-h_0 = E_{tok}[t] + E_{pos}[i],\qquad h_\ell = \operatorname{Block}_\ell(h_{\ell-1}),\qquad
-\text{logits} = \operatorname{LN}_f(h_L)\,W_{head}+b_{head} \tag{5}
+h_0 = E_{tok}[t] + E_{pos}[i],\qquad h_\ell = \mathrm{Block}_\ell(h_{\ell-1}),\qquad
+\text{logits} = \mathrm{LN}_f(h_L)\,W_{head}+b_{head} \tag{5}
 $$
 
 $$
-\mathcal{L}(\theta)= -\frac1n\sum_{i=1}^{n}\log p_\theta\big(t_{i+1}\mid t_{\le i}\big),\qquad p_\theta=\operatorname{softmax}(\text{logits}) \tag{6}
+\mathcal{L}(\theta)= -\frac1n\sum_{i=1}^{n}\log p_\theta\big(t_{i+1}\mid t_{\le i}\big),\qquad p_\theta=\mathrm{softmax}(\text{logits}) \tag{6}
 $$
 
 Equation (6) is the whole training signal: **cross-entropy on the next token**. Positions are learned embeddings $E_{pos}$ (as GPT does), not sinusoids. Training uses Adam (Kingma and Ba, 2014).
