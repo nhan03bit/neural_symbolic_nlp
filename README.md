@@ -4,7 +4,7 @@ A from-scratch TypeScript pipeline (no ML libraries) that climbs from a rule-bas
 
 ![Pipeline and status of each stage](docs/images/fig-pipeline.png)
 
-*Teal = built and measured. Amber = in progress. Violet = designed, not built. Border style repeats the colour for greyscale.*
+*Teal = built (stages 2–3 measured, stage 4 implemented). Violet = designed, not built. Border style repeats the colour for greyscale.*
 
 ## The idea in three sentences
 
@@ -20,11 +20,11 @@ A from-scratch TypeScript pipeline (no ML libraries) that climbs from a rule-bas
 | 1     | BPE tokenizer                          | Works                                                             |
 | 2     | XOR network, 2→4→1 with backprop     | Works, measured                                                   |
 | 3     | Skip-gram word embeddings              | Fixed (was collapsed), measured                                   |
-| 4     | Decoder-only transformer               | **In progress** (types and init only; does not compile yet) |
+| 4     | Decoder-only transformer               | **Done** (forward, backward, Adam, top-p generation, multi-threaded training) |
 | 5     | Symbolic layer (mask, verifier, trace) | **Designed only**                                           |
 | 6     | Experiments E1–E3 on the transformer  | **Not run, no results**                                     |
 
-Only stages 2 and 3 have results. Every number below comes from code (`bun tests/ieee-data.ts`); nothing is typed in by hand.
+Only stages 2 and 3 have measured results; the transformer trains, but no experiment has been run on it yet. Every number below comes from code (`bun tests/ieee-data.ts`); nothing is typed in by hand.
 
 ## What was measured
 
@@ -66,7 +66,7 @@ The first version gave every word pair cosine 1.0. Five independent bugs were th
 
 This cuts against a strong reading of "random weights". The learned *function* is stable across seeds; the *weights* are not. So the internal solution is neither unique nor designed, and you cannot read a reason off it. Stability also does not mean correctness: the *lion* error appears on every seed.
 
-## The transformer (target design)
+## The transformer
 
 Follows the study note: each token gets a query, key and value; attention weights are `softmax(QKᵀ/√d_k + M)V` with a causal mask `M`; several heads run in parallel; a feed-forward net refines each token; blocks stack.
 
@@ -79,9 +79,22 @@ x'  = x  + MHA(LN1(x))
 x'' = x' + W2 · ReLU(W1 · LN2(x') + b1) + b2
 ```
 
-![Designed transformer block](docs/images/fig-transformer-block.png)
+![Transformer block](docs/images/fig-transformer-block.png)
 
-Planned config: context 32, d = 32, 2 heads, feed-forward width 128, 2 layers, Adam lr 0.001. That is **12,704 parameters per block** (arithmetic, not a measurement), about 9×10⁴ in total at a 1000-token vocabulary. Training signal is next-token cross-entropy, nothing else.
+Config: context 32 (training windows of 16 tokens), d = 32, 2 heads, feed-forward width 128, 1–6 layers (default 2), Adam lr 0.001, one full-batch step per epoch. That is **12,704 parameters per block**. With the BPE vocabulary built from the stories (392 tokens, 783 merges) the model has 51,976 parameters at 2 layers and 102,792 at 6. Training signal is next-token cross-entropy, nothing else.
+
+Implementation, in `src/routes/train-transformer/`:
+
+| File | Role |
+| ---- | ---- |
+| `matrix.ts` | `matmul`, `matmulTransA/B`, Xavier init, seeded `rand` on flat row-major `Float32Array`s |
+| `transformer.ts` | LayerNorm, causal multi-head attention, FFN, block forward/backward, cross-entropy, Adam, top-p generation |
+| `weigth-layout.ts` | Packs all weights into one `SharedArrayBuffer`; zero-copy views for every thread |
+| `train-worker.ts` | Worker thread: forward + backward on its slice of sequences, gradients into shared memory |
+| `train.ts` | BPE vocab, sliding windows, spawns `cpus − 2` workers, sums gradients, Adam step, samples, checkpoints every 100 epochs to `.data/` |
+| `index.ts` | `POST /train-transformer`, streams `init`, `epoch` and `done` events over SSE |
+
+UML class and sequence diagrams of all of this are in [`docs/architecture.md`](docs/architecture.md).
 
 ## The reasoning gap
 
@@ -121,11 +134,10 @@ Four predictions the design must survive:
 
 ## Not done yet
 
-1. **Finish `src/routes/train-transformer/transformer.ts`** (written by hand by the owner). Known defects: `matmulTransAm` should be `matmulTransA`; `ln1Beta` should start at `zeros(D)`, not ones; `ff1B` should be `zeros(F)`, not `zeros(D)`; typos in `TransfomerConfig` and `numLayes`. Then LayerNorm, attention, block, forward, loss, backward, Adam, generation.
-2. **Pass five gates** before trusting any run: finite-difference gradient check (error < 10⁻³), initial loss ≈ ln V, overfit a single sequence, causal-mask test, same seed gives same weights.
-3. **Build the symbolic layer** (`symbolic.ts`, `constraints.ts`, verifier).
-4. **Run E1–E3**: E1 seed sensitivity (weight and logit distance), E2 violation rate with the mask off and on, E3 one full trace. Until then, no claim is made about the transformer or the symbolic layer.
-5. **Regenerate `.data/embedding-weights.json`**; the tracked file still holds the old collapsed model.
+1. **Pass five gates** on the transformer before trusting any run: finite-difference gradient check (error < 10⁻³), initial loss ≈ ln V, overfit a single sequence, causal-mask test, same seed gives same weights. Three forward/backward mismatches in `transformer.ts` would fail the gradient check and should be fixed first (see [architecture §9](docs/architecture.md#9-defects-found-while-drawing-the-diagrams)): the first residual multiplies instead of adds (line 494), attention skips the token itself (`j < i`, line 482), and the gradient for K uses `K` instead of `Q` (line 668). After fixing them, delete `.data/transformer-weights-*.json`, because cached checkpoints are reloaded by filename.
+2. **Build the symbolic layer** (`symbolic.ts`, `constraints.ts`, verifier).
+3. **Run E1–E3**: E1 seed sensitivity (weight and logit distance), E2 violation rate with the mask off and on, E3 one full trace. Until then, no claim is made about the transformer or the symbolic layer.
+4. **Regenerate `.data/embedding-weights.json`**; the tracked file still holds the old collapsed model.
 
 ## Limits of the evidence
 
@@ -143,7 +155,14 @@ bun tests/ieee-data.ts               # regenerate every number and table (about 
 python3 docs/images/make_figures.py  # redraw figures (needs matplotlib, numpy)
 ```
 
-`bunx tsc -b --noEmit` currently fails only inside the unfinished `transformer.ts`.
+Train the transformer at `http://localhost:5173/train-transformer`. Send `300 0.8 0.9 2 40` (epochs, temperature, top-p, layers, max tokens), or nothing for those defaults. The same thing from the shell:
+
+```bash
+curl -N -X POST localhost:5173/train-transformer -H 'content-type: application/json' \
+  -d '{"epochs":300,"temperature":0.8,"topP":0.9,"numLayers":2,"maxTokens":40}'
+```
+
+`bunx tsc -b --noEmit` passes.
 
 A 5-page IEEE-format paper of this report is in [`docs/progress/ieee/main.pdf`](docs/progress/ieee/main.pdf), built from the same data.
 
@@ -153,4 +172,4 @@ A 5-page IEEE-format paper of this report is in [`docs/progress/ieee/main.pdf`](
 - Weizenbaum (1966), ELIZA. Sennrich et al. (2016), BPE. Rumelhart et al. (1986), backpropagation. Mikolov et al. (2013a, b), Skip-gram. Vaswani et al. (2017), attention. Ba et al. (2016), LayerNorm. Kingma and Ba (2014), Adam.
 - This research was based up on simple NLP model from  [w3cj/how-llms-work](https://github.com/w3cj/how-llms-work).
 - Papers are in `docs/paper/`. Figures are in `docs/images/`: the `fig-*.png` files are drawn by `make_figures.py`; the rest are cut from the papers for study and credited in [`docs/progress/references.md`](docs/progress/references.md).
-- Longer chapter-by-chapter write-up, if you want the detail: [`docs/progress/`](docs/progress/README.md).
+- Longer chapter-by-chapter write-up, if you want the detail: [`docs/progress/`](docs/progress/README.md). Software architecture with UML diagrams: [`docs/architecture.md`](docs/architecture.md).

@@ -16,7 +16,18 @@
  *
  * Every weight is a flat Float32Array. Every gradient is computed analytically.
  */
-import { addBias, addInPlace, matmul, matmulTransA, matmulTransB, ones, rand, sumCols, xavierInit, zeros } from "./matrix.js";
+import {
+  addBias,
+  addInPlace,
+  matmul,
+  matmulTransA,
+  matmulTransB,
+  ones,
+  rand,
+  sumCols,
+  xavierInit,
+  zeros,
+} from "./matrix.js";
 
 export type TransformerConfig = {
   vocabSize: number;
@@ -25,7 +36,7 @@ export type TransformerConfig = {
   numHeads: number;
   ffDim: number;
   numLayers: number;
-}
+};
 
 export type BlockWeights = {
   ln1Gamma: Float32Array;
@@ -44,7 +55,7 @@ export type BlockWeights = {
   ff1B: Float32Array;
   ff2W: Float32Array;
   ff2B: Float32Array;
-}
+};
 
 export type TransformerWeights = {
   tokEmb: Float32Array;
@@ -54,7 +65,7 @@ export type TransformerWeights = {
   lnFBeta: Float32Array;
   headW: Float32Array;
   headB: Float32Array;
-}
+};
 
 export type BlockGrads = { [K in keyof BlockWeights]: Float32Array };
 export type TransformerGrads = {
@@ -65,9 +76,11 @@ export type TransformerGrads = {
   lnFBeta: Float32Array;
   headW: Float32Array;
   headB: Float32Array;
-}
+};
 
-type BlockAdamBuf = { [K in keyof BlockWeights]: { m: Float32Array, v: Float32Array }};
+type BlockAdamBuf = {
+  [K in keyof BlockWeights]: { m: Float32Array; v: Float32Array };
+};
 type AdamBuf = {
   tokEmb: { m: Float32Array; v: Float32Array };
   posEmb: { m: Float32Array; v: Float32Array };
@@ -76,7 +89,7 @@ type AdamBuf = {
   lnFBeta: { m: Float32Array; v: Float32Array };
   headW: { m: Float32Array; v: Float32Array };
   headB: { m: Float32Array; v: Float32Array };
-}
+};
 
 export const BLOCK_KEYS: (keyof BlockWeights)[] = [
   "ln1Gamma",
@@ -117,7 +130,7 @@ type BlockCache = {
   reluOut: Float32Array;
   ff2Out: Float32Array;
   output: Float32Array;
-}
+};
 
 export type ForwardCache = {
   tokenIds: number[];
@@ -129,7 +142,7 @@ export type ForwardCache = {
   lnFHat: Float32Array;
   logits: Float32Array;
   probs: Float32Array;
-}
+};
 
 // Initialize
 
@@ -137,7 +150,7 @@ export type ForwardCache = {
 function initBlockWeights(D: number, F: number): BlockWeights {
   return {
     ln1Gamma: ones(D),
-    ln1Beta: ones(D),
+    ln1Beta: zeros(D),
     wQ: xavierInit(D * D, D, D),
     bQ: zeros(D),
     wK: xavierInit(D * D, D, D),
@@ -149,7 +162,7 @@ function initBlockWeights(D: number, F: number): BlockWeights {
     ln2Gamma: ones(D),
     ln2Beta: zeros(D),
     ff1W: xavierInit(D * F, D, F),
-    ff1B: zeros(D),
+    ff1B: zeros(F),
     ff2W: xavierInit(F * D, F, D),
     ff2B: zeros(D),
   };
@@ -174,7 +187,7 @@ function zeroBlockGrads(D: number, F: number): BlockGrads {
     ff1B: zeros(F),
     ff2W: zeros(F * D),
     ff2B: zeros(D),
-  }
+  };
 }
 
 /**
@@ -190,8 +203,7 @@ export function initWeights(cfg: TransformerConfig): TransformerWeights {
   const { vocabSize: V, contextLen: C, embDim: D, ffDim: F, numLayers } = cfg;
   const blocks: BlockWeights[] = [];
 
-  for (let i = 0; i < numLayers; i++)
-    blocks.push(initBlockWeights(D, F));
+  for (let i = 0; i < numLayers; i++) blocks.push(initBlockWeights(D, F));
 
   return {
     tokEmb: xavierInit(V * D, V, D),
@@ -209,8 +221,7 @@ export function zeroGrads(cfg: TransformerConfig): TransformerGrads {
   const { vocabSize: V, contextLen: C, embDim: D, ffDim: F, numLayers } = cfg;
   const blocks: BlockGrads[] = [];
 
-  for (let i = 0; i < numLayers; i++)
-    blocks.push(zeroBlockGrads(D, F));
+  for (let i = 0; i < numLayers; i++) blocks.push(zeroBlockGrads(D, F));
 
   return {
     tokEmb: zeros(V * D),
@@ -253,12 +264,18 @@ export function initAdam(w: TransformerWeights): AdamBuf {
     lnFBeta: adamPair(w.lnFBeta),
     headW: adamPair(w.headW),
     headB: adamPair(w.headB),
-  }
+  };
 }
 
 /** Count the total number of trainable parameters (floats) in the model. */
 export function countParams(w: TransformerWeights): number {
-  let total = w.tokEmb.length + w.posEmb.length + w.lnFGamma.length + w.lnFBeta.length + w.headW.length + w.headB.length;
+  let total =
+    w.tokEmb.length +
+    w.posEmb.length +
+    w.lnFGamma.length +
+    w.lnFBeta.length +
+    w.headW.length +
+    w.headB.length;
   for (const bw of w.blocks) {
     for (const key of BLOCK_KEYS) {
       total += bw[key].length;
@@ -328,9 +345,7 @@ function layerNormBackward(
   dOut: Float32Array,
   xHat: Float32Array,
   gamma: Float32Array,
-  mean: Float32Array,
   variance: Float32Array,
-  x: Float32Array,
   seqLen: number,
   D: number,
   dGamma: Float32Array,
@@ -340,7 +355,7 @@ function layerNormBackward(
   const eps = 1e-5;
 
   for (let i = 0; i < seqLen; i++) {
-    const invStd = 1 / Math.sqrt(variance[i] * eps);
+    const invStd = 1 / Math.sqrt(variance[i] + eps);
 
     let sumDxHat = 0;
     let sumDxHatXHat = 0;
@@ -352,14 +367,15 @@ function layerNormBackward(
 
     for (let d = 0; d < D; d++) {
       const dxh = dOut[i * D + d] * gamma[d];
-      dX[i * D + d] = invStd * (dxh - sumDxHat / D - xHat[i * D + d] * sumDxHatXHat / D);
+      dX[i * D + d] =
+        invStd * (dxh - sumDxHat / D - (xHat[i * D + d] * sumDxHatXHat) / D);
     }
   }
 
   for (let i = 0; i < seqLen; i++) {
     for (let d = 0; d < D; d++) {
       dGamma[d] += dOut[i * D + d] * xHat[i * D + d];
-      dBeta [d] += dOut[i * D + d];
+      dBeta[d] += dOut[i * D + d];
     }
   }
 
@@ -369,17 +385,20 @@ function layerNormBackward(
 // Softmax (row-wise)
 
 /** Numerically stable row-wise softmax — subtracts the row max before exponentiating to prevent overflow. */
-function softmaxRows(x: Float32Array, rows: number, cols: number): Float32Array {
+function softmaxRows(
+  x: Float32Array,
+  rows: number,
+  cols: number,
+): Float32Array {
   const out = new Float32Array(rows * cols);
   for (let i = 0; i < rows; i++) {
     let max = -Infinity;
     for (let j = 0; j < cols; j++) {
-      if (x[i * cols + j] > max)
-        max = x[i * cols + j];
+      if (x[i * cols + j] > max) max = x[i * cols + j];
     }
     let sum = 0;
     for (let j = 0; j < cols; j++) {
-      out[i * cols * j] = Math.exp(x[i * cols * j] - max);
+      out[i * cols + j] = Math.exp(x[i * cols + j] - max);
       sum += out[i * cols + j];
     }
     for (let j = 0; j < cols; j++) {
@@ -402,7 +421,11 @@ function softmaxRows(x: Float32Array, rows: number, cols: number): Float32Array 
  * The causal mask ensures position i can only attend to positions ≤ i, which is what
  * makes this a decoder (autoregressive) model — it can't peek at future tokens.
  */
-function blockForward(input: Float32Array, bw: BlockWeights, cfg: TransformerConfig): BlockCache {
+function blockForward(
+  input: Float32Array,
+  bw: BlockWeights,
+  cfg: TransformerConfig,
+): BlockCache {
   const { embDim: D, numHeads: H, ffDim: F } = cfg;
   const S = input.length / D;
   const headDim = D / H;
@@ -410,7 +433,16 @@ function blockForward(input: Float32Array, bw: BlockWeights, cfg: TransformerCon
   const ln1Mean = new Float32Array(S);
   const ln1Var = new Float32Array(S);
   const ln1Hat = new Float32Array(S * D);
-  const ln1Out = layerNormForward(input, bw.ln1Gamma, bw.ln1Beta, S, D, ln1Mean, ln1Var, ln1Hat);
+  const ln1Out = layerNormForward(
+    input,
+    bw.ln1Gamma,
+    bw.ln1Beta,
+    S,
+    D,
+    ln1Mean,
+    ln1Var,
+    ln1Hat,
+  );
 
   const Q = matmul(ln1Out, bw.wQ, S, D, D);
   addBias(Q, bw.bQ, S, D);
@@ -464,7 +496,16 @@ function blockForward(input: Float32Array, bw: BlockWeights, cfg: TransformerCon
   const ln2Mean = new Float32Array(S);
   const ln2Var = new Float32Array(S);
   const ln2Hat = new Float32Array(S * D);
-  const ln2Out = layerNormForward(x1, bw.ln2Gamma, bw.ln2Beta, S, D, ln2Mean, ln2Var, ln2Hat);
+  const ln2Out = layerNormForward(
+    x1,
+    bw.ln2Gamma,
+    bw.ln2Beta,
+    S,
+    D,
+    ln2Mean,
+    ln2Var,
+    ln2Hat,
+  );
 
   const ff1Out = matmul(ln2Out, bw.ff1W, S, D, F);
   addBias(ff1Out, bw.ff1B, S, F);
@@ -535,7 +576,16 @@ function blockBackward(
   addInPlace(bg.ff1W, matmulTransA(bc.ln2Out, dFF1Out, S, D, F));
   const dLn2Out = matmulTransB(dFF1Out, bw.ff1W, S, F, D);
 
-  const dLn2In = layerNormBackward(dLn2Out, bc.ln2Hat, bw.ln2Gamma, bc.ln2Mean, bc.ln2Var, bc.x1, S, D, bg.ln2Gamma, bg.ln2Beta);
+  const dLn2In = layerNormBackward(
+    dLn2Out,
+    bc.ln2Hat,
+    bw.ln2Gamma,
+    bc.ln2Var,
+    S,
+    D,
+    bg.ln2Gamma,
+    bg.ln2Beta,
+  );
 
   const dInput = new Float32Array(S * D);
   for (let i = 0; i < S * D; i++) {
@@ -546,7 +596,7 @@ function blockBackward(
   for (let i = 0; i < S * D; i++) {
     dAttnOut[i] = dX1[i] + dLn2In[i];
   }
-  
+
   addInPlace(bg.bO, sumCols(dAttnOut, S, D));
 
   // Reconstruct attnVals from attention weights and V for the wO gradient
@@ -556,7 +606,9 @@ function blockBackward(
       for (let d = 0; d < headDim; d++) {
         let sum = 0;
         for (let j = 0; j <= i; j++) {
-          sum += bc.attnWeights[h * S * S + i * S + j] * bc.V[j * D + h * headDim + d];
+          sum +=
+            bc.attnWeights[h * S * S + i * S + j] *
+            bc.V[j * D + h * headDim + d];
         }
         attnVals[i * D + h * headDim + d] = sum;
       }
@@ -578,18 +630,21 @@ function blockBackward(
       for (let j = 0; j <= i; j++) {
         let dot = 0;
         for (let d = 0; d < headDim; d++) {
-          dot += dAttnVals[i * D + h * headDim + d] * bc.V[j * D + h * headDim + d];
+          dot +=
+            dAttnVals[i * D + h * headDim + d] * bc.V[j * D + h * headDim + d];
         }
         dWeights[i * S + j] = dot;
       }
 
       for (let d = 0; d < headDim; d++) {
         for (let j = 0; j <= i; j++) {
-          dV[j * D + h * headDim + d] += bc.attnWeights[h * S * S + i * S + j] * dAttnVals[i * D + h  * headDim + d];
+          dV[j * D + h * headDim + d] +=
+            bc.attnWeights[h * S * S + i * S + j] *
+            dAttnVals[i * D + h * headDim + d];
         }
       }
     }
-  
+
     const dScores = new Float32Array(S * S);
     for (let i = 0; i < S; i++) {
       let dotSum = 0;
@@ -597,15 +652,20 @@ function blockBackward(
         dotSum += dWeights[i * S + j] * bc.attnWeights[h * S * S + i * S + j];
       }
       for (let j = 0; j <= i; j++) {
-        dScores[i * S + j] = bc.attnWeights[h * S * S + i * S + j] * (dWeights[i * S + j] - dotSum) * scale;
+        dScores[i * S + j] =
+          bc.attnWeights[h * S * S + i * S + j] *
+          (dWeights[i * S + j] - dotSum) *
+          scale;
       }
     }
 
     for (let i = 0; i < S; i++) {
       for (let j = 0; j <= i; j++) {
         for (let d = 0; d < headDim; d++) {
-          dQ[i * D + h * headDim + d] += dScores[i * S + j] * bc.K[j * D + h * headDim + d];
-          dK[j * D + h * headDim + d] += dScores[i * S + j] * bc.K[i * D + h * headDim + d];
+          dQ[i * D + h * headDim + d] +=
+            dScores[i * S + j] * bc.K[j * D + h * headDim + d];
+          dK[j * D + h * headDim + d] +=
+            dScores[i * S + j] * bc.K[i * D + h * headDim + d];
         }
       }
     }
@@ -623,7 +683,16 @@ function blockBackward(
   addInPlace(dLn1Out, matmulTransB(dK, bw.wK, S, D, D));
   addInPlace(dLn1Out, matmulTransB(dV, bw.wV, S, D, D));
 
-  const dLn1In = layerNormBackward(dLn1Out, bc.ln1Hat, bw.ln1Gamma, bc.ln1Mean, bc.ln1Var, bc.input, S, D, bg.ln1Gamma, bg.ln1Beta);
+  const dLn1In = layerNormBackward(
+    dLn1Out,
+    bc.ln1Hat,
+    bw.ln1Gamma,
+    bc.ln1Var,
+    S,
+    D,
+    bg.ln1Gamma,
+    bg.ln1Beta,
+  );
 
   for (let i = 0; i < S * D; i++) {
     dInput[i] += dLn1In[i];
@@ -644,7 +713,11 @@ function blockBackward(
  * needs to compute gradients. This is the memory cost of backpropagation — you have
  * to remember everything from the forward pass.
  */
-export function forward(tokenIds: number[], w: TransformerWeights, cfg: TransformerConfig): ForwardCache {
+export function forward(
+  tokenIds: number[],
+  w: TransformerWeights,
+  cfg: TransformerConfig,
+): ForwardCache {
   const { vocabSize: V, embDim: D } = cfg;
   const S = tokenIds.length;
 
@@ -666,7 +739,16 @@ export function forward(tokenIds: number[], w: TransformerWeights, cfg: Transfor
   const lnFMean = new Float32Array(S);
   const lnFVar = new Float32Array(S);
   const lnFHat = new Float32Array(S * D);
-  const lnFOut = layerNormForward(x, w.lnFGamma, w.lnFBeta, S, D, lnFMean, lnFVar, lnFHat);
+  const lnFOut = layerNormForward(
+    x,
+    w.lnFGamma,
+    w.lnFBeta,
+    S,
+    D,
+    lnFMean,
+    lnFVar,
+    lnFHat,
+  );
 
   const logits = matmul(lnFOut, w.headW, S, D, V);
   addBias(logits, w.headB, S, V);
@@ -682,7 +764,7 @@ export function forward(tokenIds: number[], w: TransformerWeights, cfg: Transfor
     lnFVar,
     lnFHat,
     logits,
-    probs
+    probs,
   };
 }
 
@@ -696,10 +778,15 @@ export function forward(tokenIds: number[], w: TransformerWeights, cfg: Transfor
  * prediction (near 0) gives a huge loss. The average across all positions is the loss
  * value that training tries to minimize.
  */
-export function crossEntropyLoss(probs: Float32Array, targets: number[], seqLen: number, V: number): number {
+export function crossEntropyLoss(
+  probs: Float32Array,
+  targets: number[],
+  seqLen: number,
+  V: number,
+): number {
   let loss = 0;
   for (let i = 0; i < seqLen; i++) {
-    loss -= Math.log(probs[i * V + targets[i] + 1e-10]);
+    loss -= Math.log(probs[i * V + targets[i]] + 1e-10);
   }
   return loss / seqLen;
 }
@@ -739,13 +826,25 @@ export function backward(
   addInPlace(grads.headW, matmulTransA(cache.lnFOut, dLogits, S, D, V));
   let dX = matmulTransB(dLogits, w.headW, S, V, D);
 
-  const lastBlockOutput = cache.blockCaches.length > 0
-    ? cache.blockCaches[cache.blockCaches.length - 1].output
-    : cache.x0;
-  dX = layerNormBackward(dX, cache.lnFHat, w.lnFGamma, cache.lnFMean, cache.lnFVar, lastBlockOutput, S, D, grads.lnFGamma, grads.lnFBeta);
+  dX = layerNormBackward(
+    dX,
+    cache.lnFHat,
+    w.lnFGamma,
+    cache.lnFVar,
+    S,
+    D,
+    grads.lnFGamma,
+    grads.lnFBeta,
+  );
 
   for (let i = cache.blockCaches.length - 1; i >= 0; i--) {
-    dX = blockBackward(dX, cache.blockCaches[i], w.blocks[i], cfg, grads.blocks[i]);
+    dX = blockBackward(
+      dX,
+      cache.blockCaches[i],
+      w.blocks[i],
+      cfg,
+      grads.blocks[i],
+    );
   }
 
   for (let i = 0; i < S; i++) {
@@ -763,13 +862,13 @@ export function backward(
 function adamUpdateParam(
   param: Float32Array,
   grad: Float32Array,
-  buf: { m: Float32Array, v: Float32Array },
+  buf: { m: Float32Array; v: Float32Array },
   lr: number,
   bc1: number,
   bc2: number,
   beta1: number,
   beta2: number,
-  eps: number
+  eps: number,
 ) {
   const { m, v } = buf;
   for (let i = 0; i < param.length; i++) {
@@ -778,7 +877,7 @@ function adamUpdateParam(
 
     const mHat = m[i] / bc1;
     const vHat = v[i] / bc2;
-    param[i] -= lr * mHat / (Math.sqrt(vHat) + eps);
+    param[i] -= (lr * mHat) / (Math.sqrt(vHat) + eps);
   }
 }
 
@@ -812,7 +911,12 @@ export function adamUpdate(
 
   for (let i = 0; i < w.blocks.length; i++) {
     for (const key of BLOCK_KEYS) {
-      adamUpdateParam(w.blocks[i][key], grads.blocks[i][key], buf.blocks[i][key], ...args);
+      adamUpdateParam(
+        w.blocks[i][key],
+        grads.blocks[i][key],
+        buf.blocks[i][key],
+        ...args,
+      );
     }
   }
 
@@ -908,5 +1012,5 @@ export function generateText(
     ids.push(sampled);
   }
 
-  return ids.map(id => idxToToken[id]).join("");
+  return ids.map((id) => idxToToken[id]).join("");
 }

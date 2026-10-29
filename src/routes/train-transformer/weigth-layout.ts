@@ -8,7 +8,13 @@
  *
  * Layout order: [shared embeddings] [block 0 weights] [block 1 weights] ... [head weights].
  */
-import type { BlockGrads, BlockWeights, TransformerConfig, TransformerGrads, TransformerWeights } from "./transformer";
+import type {
+  BlockGrads,
+  BlockWeights,
+  TransformerConfig,
+  TransformerGrads,
+  TransformerWeights,
+} from "./transformer";
 import { BLOCK_KEYS } from "./transformer";
 
 export type LayoutEntry = {
@@ -16,7 +22,7 @@ export type LayoutEntry = {
   blockIdx: number;
   offset: number;
   length: number;
-}
+};
 
 export type WeightLayout = LayoutEntry[];
 
@@ -30,7 +36,7 @@ function weightSize(key: string, cfg: TransformerConfig): number {
     tokEmb: V * D,
     posEmb: C * D,
     ln1Gamma: D,
-    lng1Beta: D,
+    ln1Beta: D,
     wQ: D * D,
     bQ: D,
     wK: D * D,
@@ -49,12 +55,15 @@ function weightSize(key: string, cfg: TransformerConfig): number {
     lnFBeta: D,
     headW: D * V,
     headB: V,
-  }
+  };
   return sizes[key];
 }
 
 /** Compute the offset map for packing all model weights into a single flat buffer. */
-export function computeLayout(cfg: TransformerConfig): { layout: WeightLayout, totalFloats: number } {
+export function computeLayout(cfg: TransformerConfig): {
+  layout: WeightLayout;
+  totalFloats: number;
+} {
   let offset = 0;
   const layout: WeightLayout = [];
 
@@ -82,14 +91,19 @@ export function computeLayout(cfg: TransformerConfig): { layout: WeightLayout, t
 }
 
 /** Copy model weights into a new SharedArrayBuffer so worker threads can read them. */
-export function packWeightsToSab(w: TransformerWeights, layout: WeightLayout, totalFloats: number): SharedArrayBuffer {
+export function packWeightsToSab(
+  w: TransformerWeights,
+  layout: WeightLayout,
+  totalFloats: number,
+): SharedArrayBuffer {
   const sab = new SharedArrayBuffer(totalFloats * 4);
   const buf = new Float32Array(sab);
 
   for (const { key, blockIdx, offset } of layout) {
-    const src = blockIdx === -1
-      ? (w as never)[key] as Float32Array
-      : (w.blocks[blockIdx] as never)[key] as Float32Array;
+    const src =
+      blockIdx === -1
+        ? ((w as never)[key] as Float32Array)
+        : ((w.blocks[blockIdx] as never)[key] as Float32Array);
     buf.set(src, offset);
   }
 
@@ -97,27 +111,37 @@ export function packWeightsToSab(w: TransformerWeights, layout: WeightLayout, to
 }
 
 /** Copy weights back from a SharedArrayBuffer into the structured TransformerWeights object. */
-export function copyWeightsFromSab(sab: SharedArrayBuffer, layout: WeightLayout, w: TransformerWeights) {
+export function copyWeightsFromSab(
+  sab: SharedArrayBuffer,
+  layout: WeightLayout,
+  w: TransformerWeights,
+) {
   const buf = new Float32Array(sab);
   for (const { key, blockIdx, offset, length } of layout) {
-    const dst = blockIdx === -1
-      ? (w as never)[key] as Float32Array
-      : (w.blocks[blockIdx] as never) as Float32Array;
+    const dst =
+      blockIdx === -1
+        ? ((w as never)[key] as Float32Array)
+        : ((w.blocks[blockIdx] as never)[key] as Float32Array);
     dst.set(buf.subarray(offset, offset + length));
   }
 }
 
 /** Create zero-copy Float32Array views into the shared weight buffer — writes to views update the buffer directly. */
-export function createWeightViews(sab: SharedArrayBuffer, layout: WeightLayout, numLayers: number): TransformerWeights {
+export function createWeightViews(
+  sab: SharedArrayBuffer,
+  layout: WeightLayout,
+  numLayers: number,
+): TransformerWeights {
   const w = { blocks: [] as BlockWeights[] } as TransformerWeights;
   for (let i = 0; i < numLayers; i++) w.blocks.push({} as BlockWeights);
 
-  for (const { key, blockIdx, offset, length} of layout) {
+  for (const { key, blockIdx, offset, length } of layout) {
     const view = new Float32Array(sab, offset * 4, length);
     if (blockIdx === -1) {
       (w as unknown as Record<string, Float32Array>)[key] = view;
     } else {
-      (w.blocks[blockIdx] as unknown as Record<string, Float32Array>)[key] = view;
+      (w.blocks[blockIdx] as unknown as Record<string, Float32Array>)[key] =
+        view;
     }
   }
 
@@ -125,8 +149,12 @@ export function createWeightViews(sab: SharedArrayBuffer, layout: WeightLayout, 
 }
 
 /** Create zero-copy Float32Array views into the shared weight buffer — writes to views update the buffer directly. */
-export function createGradViews(sab: SharedArrayBuffer, layout: WeightLayout, numLayers: number): TransformerGrads {
-  const g = { blocks: [] as BlockGrads[]} as TransformerGrads;
+export function createGradViews(
+  sab: SharedArrayBuffer,
+  layout: WeightLayout,
+  numLayers: number,
+): TransformerGrads {
+  const g = { blocks: [] as BlockGrads[] } as TransformerGrads;
   for (let i = 0; i < numLayers; i++) g.blocks.push({} as BlockGrads);
 
   for (const { key, blockIdx, offset, length } of layout) {
@@ -134,7 +162,8 @@ export function createGradViews(sab: SharedArrayBuffer, layout: WeightLayout, nu
     if (blockIdx === -1) {
       (g as unknown as Record<string, Float32Array>)[key] = view;
     } else {
-      (g.blocks[blockIdx] as unknown as Record<string, Float32Array>)[key] = view;
+      (g.blocks[blockIdx] as unknown as Record<string, Float32Array>)[key] =
+        view;
     }
   }
 
@@ -145,13 +174,14 @@ export function createGradViews(sab: SharedArrayBuffer, layout: WeightLayout, nu
 export function sumGradsFromWorkers(
   target: TransformerGrads,
   workerGradSabs: SharedArrayBuffer[],
-  layout: WeightLayout
+  layout: WeightLayout,
 ) {
-  const wokerBufs = workerGradSabs.map(sab => new Float32Array(sab));
+  const wokerBufs = workerGradSabs.map((sab) => new Float32Array(sab));
   for (const { key, blockIdx, offset, length } of layout) {
-    const dst = blockIdx === -1
-      ? (target as never)[key] as Float32Array
-      : (target.blocks[blockIdx] as never)[key] as Float32Array;
+    const dst =
+      blockIdx === -1
+        ? ((target as never)[key] as Float32Array)
+        : ((target.blocks[blockIdx] as never)[key] as Float32Array);
     for (let i = 0; i < length; i++) {
       let sum = 0;
       for (const buf of wokerBufs) sum += buf[offset + i];

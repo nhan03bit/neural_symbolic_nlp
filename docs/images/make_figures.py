@@ -115,7 +115,7 @@ def pipeline():
         ("Stage 1", "BPE", "tokenizer", "measured", "no metric here"),
         ("Stage 2", "XOR net", "backprop", "measured", "measured"),
         ("Stage 3", "Skip-gram", "embeddings", "measured", "measured"),
-        ("Stage 4", "Transformer", "decoder-only", "wip", "partly written"),
+        ("Stage 4", "Transformer", "decoder-only", "measured", "implemented"),
         ("Stage 5", "Symbolic layer", "KB + verifier", "design", "design only"),
         ("Stage 6", "Experiments", "E1 – E3", "design", "not run"),
     ]
@@ -125,7 +125,7 @@ def pipeline():
         ax.text(x, 0.45, note, ha="center", fontsize=8, style="italic", color=MUTED)
         if i:
             arrow(ax, (xs[i - 1] + 0.72, 1.2), (x - 0.72, 1.2))
-    legend_status(ax, 0.2, -0.15)
+    legend_status(ax, 0.2, -0.15, kinds=("measured", "design"))
     save(fig, "fig-pipeline.png")
 
 
@@ -221,22 +221,22 @@ def skipgram():
 # ---- 4. transformer block ---------------------------------------------------
 def transformer():
     fig, ax = canvas(5.6, 8.0, (-3.4, 3.8), (-0.8, 11.8), "Decoder-only block (pre-LN)",
-                     "Specified, not trained. The shaded block repeats N times.")
+                     "Implemented in transformer.ts. The shaded block repeats N times.")
     w = 3.4
     y = {"in": 0.0, "emb": 1.1, "ln1": 2.5, "mha": 3.8, "add1": 5.0, "ln2": 6.1, "ff": 7.2, "add2": 8.4,
          "lnf": 9.4, "out": 10.3}
     ax.add_patch(FancyBboxPatch((-2.15, 1.55), 4.9, 7.3, boxstyle="round,pad=0,rounding_size=0.25", linewidth=1.2,
-                                linestyle=":", edgecolor=KIND["design"][1], facecolor="#F7F5FE", zorder=0))
-    ax.text(-2.3, 5.3, r"$\times N$", ha="right", va="center", fontsize=13, color=KIND["design"][1],
+                                linestyle="-", edgecolor=KIND["measured"][1], facecolor="#F2FAF8", zorder=0))
+    ax.text(-2.3, 5.3, r"$\times N$", ha="right", va="center", fontsize=13, color=KIND["measured"][1],
             fontweight="bold")
     node(ax, 0, y["in"], w, 0.65, r"token ids  $t_1 \ldots t_n$", "neutral")
-    node(ax, 0, y["emb"], w, 0.65, "token emb.  +  position emb.", "design")
+    node(ax, 0, y["emb"], w, 0.65, "token emb.  +  position emb.", "measured")
     node(ax, 0, y["ln1"], w, 0.6, "LayerNorm", "neutral", 8.5)
     node(ax, 0, y["mha"], w, 1.05, "causal multi-head attention\nheads  →  concat  →  $W_O$", "accent")
     node(ax, 0, y["ln2"], w, 0.6, "LayerNorm", "neutral", 8.5)
     node(ax, 0, y["ff"], w, 0.65, "FFN:  $W_1$,  ReLU,  $W_2$", "accent")
-    node(ax, 0, y["lnf"], w, 0.65, "LayerNorm$_f$  +  linear head", "design")
-    node(ax, 0, y["out"], w, 0.6, "logits  →  softmax", "design")
+    node(ax, 0, y["lnf"], w, 0.65, "LayerNorm$_f$  +  linear head", "measured")
+    node(ax, 0, y["out"], w, 0.6, "logits  →  softmax", "measured")
     for k in ("add1", "add2"):
         ax.add_patch(Circle((0, y[k]), 0.26, facecolor="white", edgecolor=INK, linewidth=1.4, zorder=3))
         ax.text(0, y[k], "+", ha="center", va="center", fontsize=12, zorder=4)
@@ -295,10 +295,10 @@ def taxonomy():
 # ---- 6. neuro-symbolic data flow -------------------------------------------
 def flow():
     fig, ax = canvas(9.2, 6.3, (-2.6, 8.4), (-1.0, 6.4), "Proposed neuro-symbolic data flow",
-                     "Specified, not implemented. The symbolic parts act on the logits and on the finished text.")
+                     "Symbolic parts specified, not implemented. They act on the logits and on the finished text.")
     w = 3.6
     node(ax, 0, 0, w, 0.65, "context ids", "neutral")
-    node(ax, 0, 1.3, w, 0.65, r"transformer  →  logits $\in \mathbb{R}^V$", "wip")
+    node(ax, 0, 1.3, w, 0.65, r"transformer  →  logits $\in \mathbb{R}^V$", "measured")
     node(ax, 0, 2.8, w, 1.0, "logits processor\nmask $-\\infty$  ·  bias $+\\lambda$", "design", bold=True)
     node(ax, 0, 4.3, w, 0.65, "temperature · top-$p$ · sample", "neutral")
     node(ax, 0, 5.5, w, 0.65, "verifier (post hoc)", "design", bold=True)
@@ -309,7 +309,7 @@ def flow():
     arrow(ax, (3.75, 4.0), (1.82, 3.05), color=KIND["design"][1], rad=0.1)
     arrow(ax, (5.2, 4.7), (1.82, 5.5), color=KIND["design"][1], rad=0.15)
     arrow(ax, (1.82, 2.55), (3.75, 1.75), color=KIND["design"][1], rad=-0.1)
-    legend_status(ax, -2.4, -0.9)
+    legend_status(ax, -2.4, -0.9, kinds=("measured", "design"))
     save(fig, "fig-neurosymbolic-flow.png")
 
 
