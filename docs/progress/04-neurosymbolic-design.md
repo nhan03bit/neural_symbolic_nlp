@@ -99,7 +99,7 @@ A small ontology written from the corpus, with 5 to 8 relations. Candidate relat
 A rule has the Horn form $\text{body}\Rightarrow\text{head}$. One example, chained forward:
 
 $$
-\operatorname{is\_a}(x,\text{fish}) \;\Rightarrow\; \operatorname{cannot}(x,\text{fly})
+\mathrm{is\_a}(x,\text{fish}) \;\Rightarrow\; \mathrm{cannot}(x,\text{fly})
 $$
 
 Interface sketch:
