@@ -24,7 +24,6 @@ import type {
 import { readFile, writeFile } from "node:fs/promises";
 import { cpus } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 
 import { buildSync } from "esbuild";
@@ -85,7 +84,7 @@ function serializeModel(
 }
 
 /** Try to load pre-trained weights from a cached JSON file, returning null if not found. */
-async function tryLoadWeights(path: URL): Promise<TransformerWeights | null> {
+async function tryLoadWeights(path: string): Promise<TransformerWeights | null> {
   try {
     const json = JSON.parse(await readFile(path, "utf-8"));
     const sw = json.weights;
@@ -145,13 +144,11 @@ type TrainOpts = {
 
 /** Bundle the train-worker.ts entry point with esbuild so it can be loaded as a Worker thread. */
 function buildWorkerBundle(): string {
-  const workerEntry = fileURLToPath(
-    new URL("./train-worker.ts", import.meta.url),
-  );
-  const outfile = join(
-    fileURLToPath(new URL(".", import.meta.url)),
-    ".train-worker.mjs",
-  );
+  // Resolve from the project root, not import.meta.url: in production this
+  // module is bundled into dist/index.js, where the .ts source doesn't exist.
+  const workerDir = join(process.cwd(), "src/routes/train-transformer");
+  const workerEntry = join(workerDir, "train-worker.ts");
+  const outfile = join(workerDir, ".train-worker.mjs");
   buildSync({
     entryPoints: [workerEntry],
     bundle: true,
@@ -235,10 +232,7 @@ export async function* trainTransformer(
   }
 
   const weightsFilename = `transformer-weights-e${epochs}-l${numLayers}-d${cfg.embDim}-h${cfg.numHeads}-ff${cfg.ffDim}-ctx${cfg.contextLen}.json`;
-  const weightsPath = new URL(
-    `../../../.data/${weightsFilename}`,
-    import.meta.url,
-  );
+  const weightsPath = join(process.cwd(), ".data", weightsFilename);
 
   const cached = await tryLoadWeights(weightsPath);
   if (cached) {
@@ -403,9 +397,10 @@ export async function* trainTransformer(
 
     if (epoch > 0 && epoch % 100 === 0) {
       copyWeightsFromSab(weightSab, layout, w);
-      const checkpointPath = new URL(
-        `../../../.data/transformer-weights-e${epoch}-l${numLayers}-d${cfg.embDim}-h${cfg.numHeads}-ff${cfg.ffDim}-ctx${cfg.contextLen}.json`,
-        import.meta.url,
+      const checkpointPath = join(
+        process.cwd(),
+        ".data",
+        `transformer-weights-e${epoch}-l${numLayers}-d${cfg.embDim}-h${cfg.numHeads}-ff${cfg.ffDim}-ctx${cfg.contextLen}.json`,
       );
       await writeFile(
         checkpointPath,

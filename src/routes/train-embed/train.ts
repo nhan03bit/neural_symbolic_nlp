@@ -17,6 +17,7 @@
  * Yields InitResult, then EpochResults during training, then a final TrainEmbedResult.
  */
 import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { applyMerges } from "../../server/lib/bpe.js";
 import { cosineSimilarity } from "../../server/lib/math.js";
 import { mulberry32 } from "../../server/lib/rng.js";
@@ -340,10 +341,7 @@ export async function* trainSkipGram(
   };
 
   if (opts.save !== false) {
-    const weightsPath = new URL(
-      "../../../.data/embedding-weights.json",
-      import.meta.url,
-    );
+    const weightsPath = join(process.cwd(), ".data", "embedding-weights.json");
     await writeFile(weightsPath, `${JSON.stringify(savedModel, null, 2)}\n`);
   }
 
