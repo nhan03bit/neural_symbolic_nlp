@@ -61,12 +61,14 @@ function serializeModel(
   cfg: TransformerConfig,
   vocab: string[],
   merges: { pair: [string, string]; merged: string }[],
+  history: EpochResult[],
 ) {
   return {
     type: "decoder-transformer" as const,
     config: cfg,
     vocab,
     merges,
+    history,
     weights: {
       tokEmb: round(w.tokEmb),
       posEmb: round(w.posEmb),
@@ -83,12 +85,18 @@ function serializeModel(
   };
 }
 
-/** Try to load pre-trained weights from a cached JSON file, returning null if not found. */
-async function tryLoadWeights(path: string): Promise<TransformerWeights | null> {
+/**
+ * Try to load pre-trained weights and their training log from a cached JSON file.
+ * Returns null if the file is missing, or predates saved history (so it gets retrained).
+ */
+async function tryLoadWeights(
+  path: string,
+): Promise<{ weights: TransformerWeights; history: EpochResult[] } | null> {
   try {
     const json = JSON.parse(await readFile(path, "utf-8"));
+    if (!Array.isArray(json.history)) return null;
     const sw = json.weights;
-    return {
+    const weights: TransformerWeights = {
       tokEmb: new Float32Array(sw.tokEmb),
       posEmb: new Float32Array(sw.posEmb),
       blocks: sw.blocks.map((b: Record<string, number[]>) => {
@@ -103,6 +111,7 @@ async function tryLoadWeights(path: string): Promise<TransformerWeights | null> 
       headW: new Float32Array(sw.headW),
       headB: new Float32Array(sw.headB),
     };
+    return { weights, history: json.history };
   } catch {
     return null;
   }
@@ -236,8 +245,7 @@ export async function* trainTransformer(
 
   const cached = await tryLoadWeights(weightsPath);
   if (cached) {
-    const w = cached;
-    const seedIds = allTokenIds.slice(0, 3);
+    const w = cached.weights;
 
     yield {
       vocabSize,
@@ -260,21 +268,15 @@ export async function* trainTransformer(
     }
     const finalLoss = totalLoss / sequences.length;
 
-    const sample = generateText(
-      w,
-      cfg,
-      seedIds,
-      maxTokens,
-      indexToWord,
-      temperature,
-      topP,
-      seqLen,
-    );
+    // Replay the saved training log so cached runs show the same epoch stream.
+    for (const entry of cached.history) yield entry;
 
     yield {
       architecture: `Decoder-Only Transformer (${cfg.numLayers} layers, ${cfg.embDim}d, ${cfg.numHeads}h, ${cfg.ffDim}ff) — cached`,
       finalLoss: Math.round(finalLoss * 1000000) / 1000000,
-      samples: [{ epoch: epochs, text: sample }],
+      samples: cached.history.flatMap((e) =>
+        e.sample === undefined ? [] : [{ epoch: e.epoch, text: e.sample }],
+      ),
     };
     return;
   }
@@ -304,6 +306,7 @@ export async function* trainTransformer(
     merged: m.merged,
   }));
   const collectedSamples: { epoch: number; text: string }[] = [];
+  const history: EpochResult[] = [];
   const seedIds = allTokenIds.slice(0, 3);
 
   const { layout, totalFloats } = computeLayout(cfg);
@@ -391,7 +394,13 @@ export async function* trainTransformer(
         collectedSamples.push({ epoch, text: sample });
       }
 
-      yield { epoch, loss: Math.round(loss * 1000000) / 1000000, sample };
+      const entry: EpochResult = {
+        epoch,
+        loss: Math.round(loss * 1000000) / 1000000,
+        sample,
+      };
+      history.push(entry);
+      yield entry;
       await tick();
     }
 
@@ -404,7 +413,7 @@ export async function* trainTransformer(
       );
       await writeFile(
         checkpointPath,
-        `${JSON.stringify(serializeModel(w, cfg, indexToWord, serializedMerges), null, 2)}\n`,
+        `${JSON.stringify(serializeModel(w, cfg, indexToWord, serializedMerges, history), null, 2)}\n`,
       );
     }
   }
@@ -424,7 +433,7 @@ export async function* trainTransformer(
 
   await writeFile(
     weightsPath,
-    `${JSON.stringify(serializeModel(w, cfg, indexToWord, serializedMerges), null, 2)}\n`,
+    `${JSON.stringify(serializeModel(w, cfg, indexToWord, serializedMerges, history), null, 2)}\n`,
   );
 
   yield {

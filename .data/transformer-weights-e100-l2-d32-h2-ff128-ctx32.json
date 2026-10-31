@@ -5885,6 +5885,63 @@
       "merged": " lover"
     }
   ],
+  "history": [
+    {
+      "epoch": 0,
+      "loss": 5.990472,
+      "sample": " once upon a two happy swim time water kitten no one more lion grew sun away fall am hungry darkness after children young in woman when from little young you are gave meal for thick meat took then ago bird throne wicked end"
+    },
+    {
+      "epoch": 10,
+      "loss": 5.698663,
+      "sample": " once upon a doctor happily cheese baby people may study again lions sleeps playful best flowed popular are read ago bread him it our young clever dog a came kitchen work common village for river milk can wanted water your who dry sits"
+    },
+    {
+      "epoch": 20,
+      "loss": 5.40017,
+      "sample": " once upon a juice very in the there stay wild me back noble shine playful shined grows water bear hospital helps coffee walk queen once through forest sits house puppy castle sleeps swim loud land can looked smart milk kitten there kitten wore"
+    },
+    {
+      "epoch": 30,
+      "loss": 5.154976,
+      "sample": " once upon a of man old river middle play did in drinks man there man brave river cold time kingdom the are the lived animals so playful ran scared play hidden she rules came with large her there gave his river was people"
+    },
+    {
+      "epoch": 40,
+      "loss": 4.969013,
+      "sample": " once upon a the the loudly castle as water happily hungry loved animals drank. the to he read day garden and day she a in a on walked in hidden and a for king day who happy castle through lost brave a"
+    },
+    {
+      "epoch": 50,
+      "loss": 4.838452,
+      "sample": " once upon a a castle at the the a dog by kingdom old and meat bear. the river i help in and came queen the pets said. old kind in baby he and tiger your the rice dog a a king"
+    },
+    {
+      "epoch": 60,
+      "loss": 4.763987,
+      "sample": " once upon a a day the. a. sat rice and and the ruled the the she they in a you the fast the the. the the pizza the found the the big the kingdom the and she returned said is"
+    },
+    {
+      "epoch": 70,
+      "loss": 4.731343,
+      "sample": " once upon a and the the. one through and the. said in and the. the she for she in queen they her is and the to said. the. played the dog lost the and journey the the who"
+    },
+    {
+      "epoch": 80,
+      "loss": 4.71796,
+      "sample": " once upon a happily. a the the food was a the once they kingdom a and woman girl into the and and. you the the in one and she. a with said. the. and. you and said"
+    },
+    {
+      "epoch": 90,
+      "loss": 4.708529,
+      "sample": " once upon a the the and the they and teacher. a. the. river the went found the a in cat the to in animals brave sat said sea he and a and for the the the and castle the."
+    },
+    {
+      "epoch": 100,
+      "loss": 4.699114,
+      "sample": " once upon a to the on the river to and the. the he was together i a the.. the and and they a the. the. the in the the the and and a. the kingdom with her"
+    }
+  ],
   "weights": {
     "tokEmb": [
       0.015863,
