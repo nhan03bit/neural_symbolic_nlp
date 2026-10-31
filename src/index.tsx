@@ -25,6 +25,10 @@ app.get(
             content="width=device-width, initial-scale=1.0"
           />
           <title>Hono JSX Renderer</title>
+          {/* In <head>, not #root: the client render() replaces #root's children. */}
+          {import.meta.env.PROD && (
+            <link rel="stylesheet" href="/static/index.css" />
+          )}
         </head>
         <body>{children}</body>
       </html>
@@ -36,9 +40,6 @@ app.get("/", (c) =>
   c.render(
     <>
       <div id="root">
-        {import.meta.env.PROD && (
-          <link rel="stylesheet" href="/static/index.css" />
-        )}
         {import.meta.env.PROD && (
           <script type="module" src="/static/client.js" />
         )}
@@ -54,9 +55,6 @@ app.notFound((c) =>
   c.render(
     <>
       <div id="root">
-        {import.meta.env.PROD && (
-          <link rel="stylesheet" href="/static/index.css" />
-        )}
         {import.meta.env.PROD && (
           <script type="module" src="/static/client.js" />
         )}
