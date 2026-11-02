@@ -24,7 +24,7 @@ A from-scratch TypeScript pipeline (no ML libraries) that climbs from a rule-bas
 | 5     | Symbolic layer (mask, verifier, trace) | **Designed only**                                           |
 | 6     | Experiments E1–E3 on the transformer  | **Not run, no results**                                     |
 
-Only stages 2 and 3 have measured results; the transformer trains, but no experiment has been run on it yet. Every number below comes from code (`bun tests/ieee-data.ts`); nothing is typed in by hand.
+Only stages 2 and 3 have measured results; the transformer trains, but no experiment has been run on it yet. Every number measured in this project comes from code, not typed in by hand: XOR and the seed comparison from `bun tests/ieee-data.ts`, the civil-law Skip-gram from the saved model (`.data/embedding-weights.json`). Figures quoted from papers are attributed to them.
 
 ## What was measured
 
@@ -41,20 +41,37 @@ At 5000 epochs all seeds compute the same function, but the first hidden unit's 
 
 ![XOR loss and weights across seeds](docs/images/fig-xor-loss.png)
 
-### Skip-gram: the collapse, the fix, and a wrong answer
+### Skip-gram: the civil-law vocabulary, and a wrong answer
 
-The first version gave every word pair cosine 1.0. Five independent bugs were the cause (an off-by-one in the sampling table, a missing positive update, the wrong row updated for negatives, a wrong analogy sign, and a corpus join that never lower-cased). After the fix (vocab 191, 107 sentences, dim 32, 300 epochs):
+The first version gave every word pair cosine 1.0. Five independent bugs were the cause (an off-by-one in the sampling table, a missing positive update, the wrong row updated for negatives, a wrong analogy sign, and a corpus join that never lower-cased). The fix was first checked on a toy corpus of fairy tales. That corpus is gone: the model now trains only on England & Wales civil-dispute text (222 definitions plus 34 dispute stories, 401 sentences; vocab 924 whole-word tokens from 5000 BPE merges; dim 32, window 2, 17,142 training pairs; 10,000 epochs; seed 42).
 
-| Pair         | Cosine | Pair      | Cosine |
-| ------------ | ------ | --------- | ------ |
-| man / woman  | 0.92   | cat / dog | 0.72   |
-| king / queen | 0.90   | man / cat | 0.30   |
+| Pair                | Cosine | Pair               | Cosine |
+| ------------------- | ------ | ------------------ | ------ |
+| buyer / customer    | 0.76   | defendant / tenant | 0.54   |
+| seller / buyer      | 0.74   | claimant / defendant | 0.44 |
+| claimant / creditor | 0.69   | trader / consumer  | 0.42   |
+| landlord / tenant   | 0.59   | trader / court     | −0.02  |
+| creditor / debtor   | 0.58   | judge / contract   | −0.13  |
 
-`king − man + woman` returns *queen*. But `kitten − cat + dog` returns *lion* (expected *puppy*) on all four seeds. The model learned co-occurrence, not the relation "young animal of species X". Low loss, high similarity score, wrong relation.
+Words that share sentences end up close: the consumer-rights roles (buyer, customer, seller) form one cluster, and the claimant sits next to the creditor because most claims in the corpus are debt claims. But the analogies fail. None of the five returns a role word:
 
-![PCA and cosine matrix of 15 word vectors](docs/images/fig-skipgram-geometry.png)
+| Query                          | Expected  | Returned (cosine)  |
+| ------------------------------ | --------- | ------------------ |
+| landlord − tenant + consumer   | trader    | *renters* (0.57)   |
+| trader − consumer + tenant     | landlord  | *return* (0.65)    |
+| claimant − defendant + debtor  | creditor  | *whether* (0.61)   |
+| creditor − debtor + defendant  | claimant  | *between* (0.58)   |
+| seller − buyer + customer      | supplier  | *proves* (0.72)    |
+
+The model learned co-occurrence, not the relation "the party who supplies or lends, against the party who receives or owes". Moderate similarity, wrong relation. That is the gap the symbolic layer is meant to make visible.
+
+![PCA and cosine matrix of 15 civil-law word vectors](docs/images/fig-skipgram-civil-law.png)
+
+*Drawn by `docs/images/make_civil_law_figures.py` from `.data/embedding-weights.json`. The script recomputes the five analogies and prints them, so the table above can be checked against the saved vectors.*
 
 ### Four seeds: the geometry agrees, the coordinates do not
+
+*Measured on the earlier toy corpus (`bun tests/ieee-data.ts`); not yet re-run on the civil-law corpus.*
 
 | Measure (6 seed pairs)                                | Range          |
 | ----------------------------------------------------- | -------------- |
@@ -81,7 +98,7 @@ x'' = x' + W2 · ReLU(W1 · LN2(x') + b1) + b2
 
 ![Transformer block](docs/images/fig-transformer-block.png)
 
-Config: context 32 (training windows of 16 tokens), d = 32, 2 heads, feed-forward width 128, 1–6 layers (default 2), Adam lr 0.001, one full-batch step per epoch. That is **12,704 parameters per block**. With the BPE vocabulary built from the stories (392 tokens, 783 merges) the model has 51,976 parameters at 2 layers and 102,792 at 6. Training signal is next-token cross-entropy, nothing else.
+Config: context 32 (training windows of 16 tokens), d = 32, 2 heads, feed-forward width 128, 1–6 layers (default 2), Adam lr 0.001, one full-batch step per epoch. That is **12,704 parameters per block**. With the whole-word BPE vocabulary built from the civil-law text (937 tokens, 1781 merges) the model has 87,401 parameters at 2 layers and 138,217 at 6. The recorded baseline below predates this vocabulary and used 807 tokens (1000 merges). Training signal is next-token cross-entropy, nothing else.
 
 Implementation, in `src/routes/train-transformer/`:
 
@@ -102,6 +119,33 @@ UML class and sequence diagrams of all of this are in [`docs/architecture.md`](d
 - **Weights come from a random start.** XOR and Skip-gram above show equal behaviour from unrelated weights.
 - **"Pure emergent, not designed" means opaque.** Attention maps show where the model looked, not a justification it could be held to.
 - **More layers do not change the objective.** Whether reasoning emerges at scale is open. We claim only that nothing in *this* small model asks for it or exposes it.
+
+### Does adding semantic loss close the gap? No
+
+*From the literature and our own derivations. Nothing here has been run on this transformer.*
+
+The obvious next step is to change the objective: train on cross-entropy plus a semantic loss (M5, below), `CE + λ_s · (−log P_A)`, where `P_A` is the total probability the model gives to the tokens the knowledge base allows at that position. That still leaves the transformer's ambiguity unresolved, but not because the loss is random. It is a deterministic function of the probabilities: the same logits always give the same value. The randomness in this repo is elsewhere, in the seeded weight initialisation and in top-p sampling, and this approach leaves both in place (see below).
+
+The limits come from what the term can see and reach:
+
+- **It cannot choose among allowed tokens.** Next-token entropy splits as `H(p) = H_b(P_A) + P_A·H(q_A) + (1−P_A)·H(q_B)`, where `q_A` and `q_B` are `p` renormalised over the allowed and banned tokens. The loss depends only on `P_A`, so `H(q_A)` is outside its objective (our derivation). In the words of van Krieken et al. (2024), a constraint "only specifies what worlds are possible but does not specify which one is correct".
+- **It is a soft penalty.** When the data and a rule conflict, the optimum at one context keeps banned mass `f_B / (1 + λ_s)`, where `f_B` is the banned tokens' frequency in the data (our derivation). There is no guarantee at test time (Ahmed et al., 2022). Xu et al. (2018) report that 69.89% of test predictions satisfied the constraint on grid paths and 55.28% on preference rankings: large gains, far from complete.
+- **It acts only where it is applied.** Allowed sets come from corpus prefixes, so nothing constrains a prefix the model generates and the corpus never contains. Where the target is already allowed, `CE = masked CE + (−log P_A)`, so the term re-weights something cross-entropy already optimises (our derivation). It changes the speed of learning there, not the optimum.
+- **It inherits the knowledge.** A missing rule constrains nothing, and a wrong one is trained in. Even with correct constraints, the generalisation benefit comes with a bias toward a suboptimal model (Wang et al., 2023).
+- **It can amplify seed differences.** Zombori et al. (2024) prove for softmax regression that, with no other supervision, this form of loss concentrates mass on whichever allowed token starts largest. Which token wins then depends on the initial weights. Whether this happens in a shared-weight transformer has to be measured.
+
+Adding the mask and verifier narrows the gap without closing it. The mask makes a covered banned token impossible, but only for token IDs the knowledge base bans and only when a trigger fires. The guarantee is relative to the knowledge base, and the verifier adds its own parsing errors. Neither can tell which of several valid tokens is right, and a wrong rule is then enforced absolutely.
+
+**The two sources of randomness also stay.** None of M1–M5 removes either one:
+
+| Source | Where | What the approach does to it | What is left |
+| ------ | ----- | ---------------------------- | ------------ |
+| **Weight initialisation** | Xavier init from the seeded `rand` (`matrix.ts`) | The semantic loss constrains outputs, not coordinates, so it adds a term to training that still starts from random weights. The mask, trace and verifier never touch the weights. | Seeds still end at unrelated weights, as XOR shows above, and may disagree more among allowed tokens (Zombori et al., above). |
+| **Top-p sampling** | The draw in `generateText` (`transformer.ts`), from the same `rand` | The semantic loss changes the probabilities drawn from, and the mask removes banned tokens before temperature and top-p. The draw itself stays. The verifier only checks text after it is drawn. | The next token is still picked at random from whatever remains in the nucleus. |
+
+Two ways of removing them only appear to work. Fixing the seed makes a run repeatable, not justified: seed 42 is no more correct than seed 1, and repeating an answer gives no reason for it. Greedy decoding removes the draw, but the output is then one fixed point of one seed's distribution, so the disagreement between seeds is still there, just out of sight. Both can be measured across seeds, but not removed while the network writes the output. The only route that removes them from an output's content is to stop the network authoring it (a formal query, a reasoner and a template), which gives up generation and still repeats every knowledge-base error.
+
+Removing all uncertainty would be the wrong goal anyway, because language has many acceptable continuations and ambiguity is a normal feature of it (Piantadosi et al., 2012; Holtzman et al., 2020). The realistic target is **zero mass on rule-excluded tokens and a calibrated spread over the rest**, with each guarantee stated next to its coverage.
 
 ## The neuro-symbolic design
 
@@ -132,27 +176,125 @@ Four predictions the design must survive:
 | P3 | The unconstrained model violates the knowledge base at a non-trivial rate | rate near 0           |
 | P4 | Seeds give similar loss but different weights                             | weights agree closely |
 
+## PRE TRAINING: the baseline before the symbolic layer
+
+This is the reference point for comparison. Everything here was trained by next-token or context prediction alone, with **no** knowledge base, mask, bias, trace, verifier or semantic loss. When the neuro-symbolic layer is built, the same commands and settings are run again and compared with this section. Recorded 2026-10-31 on the working tree of commit `c42da07`.
+
+### What was measured
+
+**Skip-gram (stage 3)**, from the `/train-embed` page with the words `claimant defendant landlord tenant`: 10,000 epochs (the route's default), seed 42.
+
+| Corpus | Value |
+| ------ | ----- |
+| Sentences | 401 |
+| Vocabulary | 924 |
+| Dimensions | 32 |
+| Window | 2 |
+| Training pairs | 17,142 |
+| Loss at epoch 0 | 4.102625 |
+
+| Word | Five nearest neighbours (cosine) |
+| ---- | -------------------------------- |
+| claimant | creditor 0.69, remoteness 0.67, limitation 0.67, evidence 0.66, test 0.64 |
+| defendant | noise 0.69, loser 0.66, authorities 0.64, hearing 0.62, talking 0.62 |
+| landlord | tenant 0.59, protect 0.59, higher 0.57, thought 0.57, loss 0.56 |
+| tenant | income 0.67, area 0.66, disputed 0.64, buyer 0.63, price 0.62 |
+
+| Pair | Cosine |
+| ---- | ------ |
+| landlord ↔ tenant | 0.59 |
+| defendant ↔ tenant | 0.54 |
+| claimant ↔ defendant | 0.44 |
+| defendant ↔ landlord | 0.44 |
+| claimant ↔ tenant | 0.43 |
+| claimant ↔ landlord | 0.40 |
+
+Analogies: 0 of 5 correct (the table is in the Skip-gram section above).
+
+<details>
+<summary>Screenshots of the run</summary>
+
+![Corpus statistics and first epoch](docs/images/pretrain-embed-corpus.png)
+![Nearest neighbours](docs/images/pretrain-embed-neighbors.png)
+![Pairwise similarity and vector analogies](docs/images/pretrain-embed-similarity.png)
+
+</details>
+
+**Transformer (stage 4)**: 300 epochs, 2 layers, temperature 0.8, top-p 0.9, 40 tokens, run headless through `trainTransformer` (710 s on 10 cores).
+
+| Measure | Value |
+| ------- | ----- |
+| Training text | 256 items (222 definitions + 34 stories) |
+| Vocabulary | 807 tokens (1000 BPE merges) |
+| Parameters | 78,951 |
+| Training windows | 6,431 windows of 16 tokens |
+| Loss at epoch 0 | 6.717 (ln 807 = 6.693, a uniform guess, as expected) |
+| Lowest loss | 5.637 at epoch 210 |
+| Final loss, epoch 300 | 5.678 (perplexity ≈ 292) |
+
+Sample at epoch 300, prompt `the claimant is`:
+
+> the claimant is. the and. six.. on of to track the the. takes of of founds tenant usually. th needs. fromy paid you tenant did the the t to learner. agreement. she
+
+The loss stops falling after about 100 epochs and the text is domain words in no order. That is the result to expect from the three forward/backward defects present at the time, since fixed (the first residual multiplies instead of adds, attention skips the token itself, the K gradient uses `K`). **This baseline measures the transformer with those defects.** Weights: `.data/transformer-weights-e300-l2-d32-h2-ff128-ctx32-cbf9d5315.json`.
+
+### What this baseline does not include
+
+- No symbolic component of any kind (M1–M5 are all off).
+- No fix to `transformer.ts`; the defects above are part of what is measured.
+- One seed only. The Skip-gram and the transformer use different BPE settings (5000 against 1000 merges), so their vocabularies (924 against 807) are not comparable with each other. Compare each model only with its own neuro-symbolic run.
+
+### Risks to a fair comparison, and the guardrail for each
+
+| Risk | Guardrail |
+| ---- | --------- |
+| `transformer.ts` is fixed before the neuro-symbolic run, so any gain comes from the fix, not the symbolic layer | If the code changes, re-run this baseline first and replace the numbers here |
+| The corpus changes | The transformer weights file name carries the corpus hash (`-cbf9d5315`); a different hash means a new baseline is needed |
+| Different epochs (the UI defaults to 10,000 Skip-gram epochs; the probe script defaults to 300) | Compare at the epochs recorded here |
+| A difference smaller than the seed-to-seed spread | Treat it as noise until E1 measures that spread |
+| The intermediate checkpoints (`…-e100-…json`, `…-e200-…json`) have no corpus hash in their names, so they can be mistaken for a different corpus's run | Use only the hashed final file as the baseline |
+
+### How to reproduce it
+
+1. Skip-gram: `bun run dev`, open `/train-embed`, send `claimant defendant landlord tenant`, and check that the four tables above come back.
+2. Skip-gram figure and analogies: `python3 docs/images/make_civil_law_figures.py`. It must print `renters (0.57)`, `return (0.65)`, `whether (0.61)`, `between (0.58)` and `proves (0.72)`.
+3. Transformer: delete the hashed weights file, then run
+   `curl -N -X POST localhost:5173/train-transformer -H 'content-type: application/json' -d '{"epochs":300,"temperature":0.8,"topP":0.9,"numLayers":2,"maxTokens":40}'`.
+   The recorded baseline reported vocabulary 807, 78,951 parameters and 6,431 sequences, loss 6.717273 at epoch 0 and a final loss of 5.677629. Those values no longer reproduce, because D1–D3 are fixed and the vocabulary has changed. The current code reports vocabulary 937, 87,401 parameters and 5,374 sequences for this command; its losses have not been recorded yet.
+4. Regression check: `bun test tests/train-embed.test.ts` (5 pass).
+
+### Comparison table (to fill in after the neuro-symbolic run)
+
+| Metric | PRE TRAINING (this section) | Neuro-symbolic |
+| ------ | --------------------------- | -------------- |
+| Skip-gram analogies correct | 0 / 5 | — |
+| landlord ↔ tenant cosine | 0.59 | — |
+| Transformer final loss (300 epochs) | 5.678 | — |
+| Knowledge-base violation rate (E2) | not measured (needs the verifier) | — |
+| Banned-token probability mass, `massBefore` (E3) | not measured (needs the trace) | — |
+
 ## Not done yet
 
-1. **Pass five gates** on the transformer before trusting any run: finite-difference gradient check (error < 10⁻³), initial loss ≈ ln V, overfit a single sequence, causal-mask test, same seed gives same weights. Three forward/backward mismatches in `transformer.ts` would fail the gradient check and should be fixed first (see [architecture §9](docs/architecture.md#9-defects-found-while-drawing-the-diagrams)): the first residual multiplies instead of adds (line 494), attention skips the token itself (`j < i`, line 482), and the gradient for K uses `K` instead of `Q` (line 668). After fixing them, delete `.data/transformer-weights-*.json`, because cached checkpoints are reloaded by filename.
+1. **Re-run the baseline on the fixed transformer.** The five gates now pass (`tests/train-transformer.test.ts`): finite-difference gradient check (error < 10⁻³), initial loss ≈ ln V, overfit a single sequence, causal-mask test, same seed gives same weights. They needed three forward/backward fixes in `transformer.ts`, made on 2026-11-02 (see [architecture §9](docs/architecture.md#9-defects-found-while-drawing-the-diagrams)): the first residual multiplied instead of adding (line 494), attention skipped the token itself (`j < i`, line 482), and the gradient for K used `K` instead of `Q` (line 668). Older weights stay in `.data` but are not loaded, because filenames now carry `MODEL_VERSION`.
 2. **Build the symbolic layer** (`symbolic.ts`, `constraints.ts`, verifier).
 3. **Run E1–E3**: E1 seed sensitivity (weight and logit distance), E2 violation rate with the mask off and on, E3 one full trace. Until then, no claim is made about the transformer or the symbolic layer.
-4. **Regenerate `.data/embedding-weights.json`**; the tracked file still holds the old collapsed model.
+4. **Rewrite `tests/ieee-data.ts` for the civil-law corpus.** It still measures king/queen/cat, so the seed comparison and the IEEE paper figures cannot be regenerated until it is.
 
 ## Limits of the evidence
 
-Toy corpus (107 sentences), four seeds, one configuration, no significance tests, an answer key we chose ourselves, no held-out set. The results show a mechanism, not behaviour at scale. The study note is the author's own, not peer reviewed.
+Small corpora (the seed comparison used a 107-sentence toy corpus; the civil-law Skip-gram is 401 sentences and one seed), four seeds, one configuration, no significance tests, an answer key we chose ourselves, no held-out set. The results show a mechanism, not behaviour at scale. The study note is the author's own, not peer reviewed.
 
 ## Run it
 
 ```bash
 bun install
 bun run dev                          # app at http://localhost:5173
-bun test tests/train-embed.test.ts   # 4 Skip-gram sanity tests
+bun test tests/train-embed.test.ts   # 5 Skip-gram sanity tests
 bun tests/probe-xor.ts               # XOR across seeds 42/1/2/3
-bun tests/probe-embed.ts 300         # Skip-gram, 300 epochs, about 6 s
+bun tests/probe-embed.ts 300         # Skip-gram, 300 epochs, about 85 s
 bun tests/ieee-data.ts               # regenerate every number and table (about 25 s)
 python3 docs/images/make_figures.py  # redraw figures (needs matplotlib, numpy)
+python3 docs/images/make_civil_law_figures.py  # civil-law Skip-gram figure
 ```
 
 Train the transformer at `http://localhost:5173/train-transformer`. Send `300 0.8 0.9 2 40` (epochs, temperature, top-p, layers, max tokens), or nothing for those defaults. The same thing from the shell:
@@ -169,6 +311,9 @@ A 5-page IEEE-format paper of this report is in [`docs/progress/ieee/main.pdf`](
 ## References
 
 - Sheth, A., Roy, K., Gaur, M. (2023). Neurosymbolic Artificial Intelligence (Why, What, and How). *IEEE Intelligent Systems* 38(3), 56–62.
+- Xu, J., Zhang, Z., Friedman, T., Liang, Y., Van den Broeck, G. (2018). A Semantic Loss Function for Deep Learning with Symbolic Knowledge. *ICML*. [arXiv:1711.11157](https://arxiv.org/abs/1711.11157).
+- Semantic loss limits: van Krieken et al. (2024), [On the Independence Assumption in Neurosymbolic Learning](https://arxiv.org/abs/2404.08458), *ICML*. Ahmed et al. (2022), [Semantic Probabilistic Layers for Neuro-Symbolic Learning](https://arxiv.org/abs/2206.00426), *NeurIPS*. Wang et al. (2023), [On Regularization and Inference with Label Constraints](https://arxiv.org/abs/2307.03886), *ICML*. Zombori et al. (2024), [Towards Unbiased Exploration in Partial Label Learning](https://arxiv.org/abs/2307.00465), *JMLR* 25(412).
+- Ambiguity in language: Piantadosi, Tily, Gibson (2012), The communicative function of ambiguity in language, *Cognition* 122(3). Holtzman et al. (2020), [The Curious Case of Neural Text Degeneration](https://arxiv.org/abs/1904.09751), *ICLR*.
 - Weizenbaum (1966), ELIZA. Sennrich et al. (2016), BPE. Rumelhart et al. (1986), backpropagation. Mikolov et al. (2013a, b), Skip-gram. Vaswani et al. (2017), attention. Ba et al. (2016), LayerNorm. Kingma and Ba (2014), Adam.
 - This research was based up on simple NLP model from  [w3cj/how-llms-work](https://github.com/w3cj/how-llms-work).
 - Papers are in `docs/paper/`. Figures are in `docs/images/`: the `fig-*.png` files are drawn by `make_figures.py`; the rest are cut from the papers for study and credited in [`docs/progress/references.md`](docs/progress/references.md).

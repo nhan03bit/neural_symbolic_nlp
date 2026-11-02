@@ -4,7 +4,7 @@ This chapter follows the order of the author's study note (`docs/paper/NLP Trans
 
 **Provenance of the material.** The note is a set of annotated screenshots of an animated transformer visual. It has no equations and no worked numbers; its attention weights on page 1 (0.05, 0.45, 0.10, 0.08, 0.02, 0.30) are illustrative. Section headings below that cite the note are the note's order. Every equation is **added by the author of this report** (standard Vaswani et al., 2017 and GPT-style pre-LN), and is labelled as such. Quotations keep the note's wording, marked `[sic]` where the English is non-native.
 
-**Implementation status.** `src/routes/train-transformer/transformer.ts` is written by hand by the project owner and is unfinished (see [chapter 05](05-implementation-and-evaluation.md#1-implementation-status-and-known-issues)). The mapping tables in this chapter name the functions that *will* hold each step; they are the target layout, not existing code, unless a row says otherwise.
+**Implementation status.** `src/routes/train-transformer/transformer.ts` is written by hand by the project owner. Every step in this chapter now exists in code and trains, but three forward/backward defects remain and the verification gates have not been passed (see [chapter 05](05-implementation-and-evaluation.md#1-implementation-status-and-known-issues)). So the equations here describe the intended model, and the code differs from them in those three places.
 
 ## 1. Self-attention as Query, Key, Value (note p1)
 
@@ -111,20 +111,22 @@ Per block, with $D=32$, $F=128$ (arithmetic, not a measurement):
 | Feed-forward $W_1,b_1,W_2,b_2$ | $DF+F+FD+D=8352$ |
 | **Per block** | **12 704** |
 
-Two blocks: 25 408. Add positional embeddings ($32\times32=1024$), the final LayerNorm (64), and the vocabulary-dependent terms: token embedding $V\cdot D$ and head $V\cdot D+V$. At $V=1000$ the vocabulary terms are about 64 000, so the total is on the order of $9\times10^4$. A real GPT-1 has about $10^8$. Everything here is a model of the mechanism, not of scale.
+Two blocks: 25 408. Add positional embeddings ($32\times32=1024$), the final LayerNorm (64), and the vocabulary-dependent terms: token embedding $V\cdot D$ and head $V\cdot D+V$. With the civil-law vocabulary ($V=807$) the model has 78,951 parameters at 2 layers and 129,767 at 6. A real GPT-1 has about $10^8$. Everything here is a model of the mechanism, not of scale.
 
-## 7. Mapping to code (target layout)
+## 7. Mapping to code
 
 | Step | Note | Function | Status |
 |---|---|---|---|
-| Types, config, block keys | p1–4 | `TransformerConfig`, `BlockWeights`, `BLOCK_KEYS` in `transformer.ts` | Written (with defects, see ch. 05) |
-| Weight init (Xavier) | – | `initBlockWeights`, `initWeights` | Block init written; full init not |
+| Types, config, block keys | p1–4 | `TransformerConfig`, `BlockWeights`, `BLOCK_KEYS` in `transformer.ts` | Done |
+| Weight init (Xavier) | – | `initBlockWeights`, `initWeights` | Done |
 | Matrix ops, seeded RNG | – | `matrix.ts`, `src/server/lib/rng.ts` | Done |
-| LayerNorm forward/backward | p4 | `layerNormForward/Backward` | Not written |
-| Causal multi-head attention | p1–3 | in `blockForward` | Not written |
-| Block, stacking | p4–5 | `blockForward/Backward`, `forward` | Not written |
-| Loss, backward, Adam | – | `crossEntropyLoss`, `backward`, `adamUpdate` | Not written |
-| Generation | – | `generateText` | Not written |
-| Training loop + SSE route | – | `train.ts`, `index.ts` | Not written |
+| LayerNorm forward/backward | p4 | `layerNormForward/Backward` | Done |
+| Causal multi-head attention | p1–3 | in `blockForward` | Done, with D2 (attention skips the token itself) and D3 (the K gradient uses `K`) |
+| Block, stacking | p4–5 | `blockForward/Backward`, `forward` | Done, with D1 (the first residual multiplies instead of adds) |
+| Loss, backward, Adam | – | `crossEntropyLoss`, `backward`, `adamUpdate` | Done |
+| Generation | – | `generateText` | Done (top-p) |
+| Training loop + SSE route | – | `train.ts`, `index.ts` | Done (multi-threaded, SSE) |
+
+The defects D1–D3 are defined in [architecture §9](../architecture.md#9-defects-found-while-drawing-the-diagrams).
 
 The `ForwardCache` type already stores `logits` and `probs` for every position, which is the hook the symbolic layer needs in chapter 04.

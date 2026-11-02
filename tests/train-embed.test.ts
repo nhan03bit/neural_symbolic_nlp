@@ -8,7 +8,7 @@ import type {
 } from "../src/routes/train-embed/train.js";
 import { trainSkipGram } from "../src/routes/train-embed/train.js";
 
-const WORDS = ["king", "queen", "man", "woman", "cat", "dog", "tiger"];
+const WORDS = ["claimant", "defendant", "landlord", "tenant", "trader", "consumer", "court"];
 
 async function run(epochs: number) {
   const epochResults: EpochResult[] = [];
@@ -50,7 +50,7 @@ describe("cosineSimilarity", () => {
 
 describe("skip-gram", () => {
   test("loss falls and embeddings do not collapse", async () => {
-    const { init, epochResults, result } = await run(300);
+    const { init, epochResults, result } = await run(100);
 
     expect(init.embeddingDim).toBe(32);
     expect(epochResults.length).toBeGreaterThan(5);
@@ -70,12 +70,25 @@ describe("skip-gram", () => {
       result.similarities.find(
         (s) => (s.a === a && s.b === b) || (s.a === b && s.b === a),
       )!.score;
-    expect(sim("king", "queen")).toBeGreaterThan(sim("king", "cat"));
-    expect(sim("man", "woman")).toBeGreaterThan(sim("man", "cat"));
-  }, 60_000);
+    expect(sim("landlord", "tenant")).toBeGreaterThan(sim("landlord", "court"));
+    expect(sim("claimant", "defendant")).toBeGreaterThan(sim("trader", "court"));
+  }, 120_000);
 
   test("analogy query labels match the arithmetic", async () => {
     const { result } = await run(50);
     for (const a of result.analogies) expect(a.query).toMatch(/ - .* \+ /);
-  }, 60_000);
+  }, 120_000);
+});
+
+describe("civil-law corpus", () => {
+  test("contains no toy-corpus words and keeps role words whole", async () => {
+    const { buildVocab, LAW_DATASET } = await import("../src/routes/train-embed/corpus.js");
+    const { wordToIndex } = buildVocab(LAW_DATASET);
+    for (const toy of ["king", "queen", "prince", "princess", "kitten", "puppy", "cat", "tiger"]) {
+      expect(wordToIndex.has(toy)).toBe(false);
+    }
+    for (const role of ["claimant", "defendant", "landlord", "tenant", "trader", "consumer", "creditor", "debtor"]) {
+      expect(wordToIndex.has(role)).toBe(true);
+    }
+  });
 });

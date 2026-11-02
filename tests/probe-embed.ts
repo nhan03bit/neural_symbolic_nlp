@@ -3,7 +3,7 @@ import { trainSkipGram } from "../src/routes/train-embed/train.js";
 const epochs = Number(process.argv[2] ?? 300);
 const t0 = performance.now();
 for await (const item of trainSkipGram({
-  words: ["king", "queen", "man", "woman", "cat", "dog", "tiger", "elephant"],
+  words: ["claimant", "defendant", "landlord", "tenant", "trader", "consumer", "creditor", "debtor"],
   epochs, dimensions: 32, windowSize: 2, negativeSamples: 5, save: false,
 })) {
   if ("vocabSize" in item) console.log("init", JSON.stringify(item));

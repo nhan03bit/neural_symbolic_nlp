@@ -30,10 +30,13 @@ export default new Hono().post(
   zValidator("json", TrainTransformerRequest),
   (c) => {
     const body = c.req.valid("json");
-    const trainer = trainTransformer(body);
 
     return streamSSE(c, async (stream) => {
       const { emit } = createEmitter(stream);
+      // Training holds most of the CPU for hours, so it stops when nobody is listening.
+      const disconnect = new AbortController();
+      stream.onAbort(() => disconnect.abort());
+      const trainer = trainTransformer({ ...body, signal: disconnect.signal });
       for await (const result of trainer) {
         if (isTrainResult(result)) {
           await emit(result, "done");

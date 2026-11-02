@@ -1,6 +1,6 @@
 # 04. A feasible neuro-symbolic design for this model
 
-**Status: design only. None of the code in this chapter exists yet.** It is the specification that the symbolic layer will be built against once the transformer's forward pass and generation function are finished. Where a claim depends on a measurement, it is listed as a hypothesis for [chapter 05](05-implementation-and-evaluation.md).
+**Status: design only. None of the code in this chapter exists yet.** It is the specification that the symbolic layer will be built against once the transformer's known defects are fixed and it passes the verification gates ([chapter 05 §3](05-implementation-and-evaluation.md#3-verification-gates-for-the-transformer)). The code snippets are in [chapter 07](07-neurosymbolic-code-2b.md). Where a claim depends on a measurement, it is listed as a hypothesis for [chapter 05](05-implementation-and-evaluation.md).
 
 ## 1. The source taxonomy
 
@@ -44,11 +44,11 @@ The paper's Fig. 2 shows the two ways to compress a knowledge graph for a neural
 | **M2 Soft logit bias** | Adds $+\lambda$ to tokens the knowledge base supports | 1a-style lowering, by analogy | Same qualification |
 | **M3 Reasoning trace** | Records, per step, which rules fired and which tokens were blocked | Supports explainability; part of **2a** | The trace explains the *constraint*, not the network's internal computation |
 | **M4 Post-hoc verifier** | Parses generated text into triples and checks them against the knowledge base | **2a decoupled lifting** | Parsing is by rule over whole words |
-| **M5 Semantic loss** (stretch) | Adds a training term that rewards probability mass on allowed tokens | Edges toward **2b** | Needs a differentiable formulation; not required for the core claim |
+| **M5 Semantic loss** (stretch) | Adds a training term that rewards probability mass on allowed tokens | Edges toward **2b** | Specified in chapter 07, not implemented. Not required for the core claim |
 
 We do **not** attempt a full 2b system (end-to-end differentiable reasoning). It is future work (chapter 06).
 
-How this answers the reasoning gap of chapter 03: the gap is that the model cannot account for its output. M3 and M4 give an *account of the constraint behaviour* that is independent of the weights: a rule identifier and a blocked-token list for every step. They do not make the transformer itself reason, and the report should not claim that.
+How this answers the reasoning gap of chapter 03: the gap is that the model cannot account for its output. M3 and M4 give an *account of the constraint behaviour* that is independent of the weights: a rule identifier and a blocked-token list for every step. They do not make the transformer itself reason, and the report should not claim that. Nor do they close the gap: [chapter 03 §7](03-reasoning-gap.md#7-why-a-symbolic-layer-does-not-close-it) sets out what remains, including both sources of randomness.
 
 ## 3. Architecture
 
@@ -56,7 +56,7 @@ How this answers the reasoning gap of chapter 03: the gap is that the model cann
 flowchart TD
   P["prompt tokens"] --> F["transformer forward<br/>last-position logits z (length V)"]
   F --> C["copy z (fresh array)"]
-  KB[("knowledge base<br/>triples + Horn rules")] --> R["reasoner<br/>forward chaining over context"]
+  KB[("knowledge base<br/>triples + Horn rules")] --> R["reasoner<br/>KB closed by forward chaining;<br/>triggers match the context"]
   P --> R
   R --> A["allowed set A_t<br/>supported set S_t"]
   C --> M["logits processor<br/>M1 mask / M2 bias"]
@@ -81,11 +81,15 @@ flowchart TD
 - $-\infty$ divided by a temperature is still $-\infty$, and $\exp(-\infty)=0$, so masked tokens get exactly zero probability and are excluded from the renormalised top-p nucleus.
 - The unconstrained path stays untouched: with the processor absent, generation must reproduce the unconstrained output byte for byte at the same seed. That is a required test.
 
-**Guard.** If the mask would ban every token, softmax would produce NaN. The processor must fall back to the unmasked logits and record the fallback in the trace.
+**Guard.** If the mask would ban every token, softmax would produce NaN. The processor must fall back to the unmasked logits and record the fallback in the trace. A fallback step lies outside the P1 guarantee, so it must be counted.
+
+**Training and generation are separate paths.** The diagram shows generation only. M5 acts during training, on the raw logits, with no mask and no bias. M1–M3 act during generation, on a fresh copy of the logits. Both read the same allowed set, and they meet only through the saved weights. The order matters: if the mask ran before the semantic loss, the allowed mass would be 1, so the loss and its gradient would be exactly 0, with no error. A unit test should assert this. The published name for this two-layer pattern is constrained learning plus constrained inference. No paper we found tests this exact pipeline.
 
 ## 4. The knowledge base (`symbolic.ts`)
 
-A small ontology written from the corpus, with 5 to 8 relations. Candidate relations and examples that the corpus actually supports (the final list is fixed after reading the corpus again, so treat these as illustrative):
+A small ontology written from the corpus, with 5 to 8 relations.
+
+**This table is out of date.** It was written for the earlier story corpus. The model now trains on civil-law text, so a new knowledge base has to be written before anything can run. In a read-only probe (2026-11-01, not a recorded experiment), the chapter 07 knowledge base fired on 0 of 6,447 positions, and 14 role words under a one-word trigger reached about 2.05%. The relations below show the form only:
 
 | Relation | Example triple | Source sentence type |
 |---|---|---|
@@ -101,6 +105,8 @@ A rule has the Horn form $\text{body}\Rightarrow\text{head}$. One example, chain
 $$
 \mathrm{is\_a}(x,\text{fish}) \;\Rightarrow\; \mathrm{cannot}(x,\text{fly})
 $$
+
+Horn rules have no exceptions, so this one would enforce a falsehood about flying fish, with a proof attached. Rules for the civil-law knowledge base need the same check. Also, `can` and `cannot` are unrelated predicates, so a knowledge base can derive both for the same pair unless an integrity check forbids it.
 
 Interface sketch:
 
@@ -134,7 +140,7 @@ z_i + \lambda\,\mathbb{1}[i\in S_t] & i\in A_t\\
 \tag{7}
 $$
 
-$\lambda=0$ gives a pure mask. The trace (M3) records, per step:
+$\lambda=0$ gives a pure mask. The bias comes before temperature, so its effective odds multiplier is $\exp(\lambda/T)$, not $\exp(\lambda)$. The trace (M3) records, per step:
 
 ```ts
 type StepTrace = {
@@ -148,11 +154,13 @@ type StepTrace = {
 };
 ```
 
-`massBefore` is the useful number for the explanation: it says how much probability the network *wanted* to put on a token the knowledge base rejected. A large value is direct evidence of the gap; a value near zero means the network already agreed.
+`massBefore` is the useful number for the explanation: it says how much probability the network *wanted* to put on a token the knowledge base rejected. A large value is evidence of the gap only against a control: on a near-uniform model, any small token set carries mass by chance, so compare it with a random token set of similar frequency. A value near zero means the network already agreed.
 
 ## 6. The verifier (M4)
 
 `verify(text) => { violations: { sentence: string; triple: Triple; rule: string }[] }` parses the generated text into triples by pattern, then checks each against the knowledge base and its entailments. Optionally, rejection sampling retries up to $N$ times until `violations` is empty. The verifier is decoupled from the network, so it can also check text produced with the processor off: that is what lets E2 compare the two.
+
+**Zero violations is not the same as zero claims checked.** As specified, the verifier returns only violations, so a text it could not parse looks identical to a clean one. That is the likely outcome on text like the current baseline sample. It should report how many claims it parsed, and three outcomes: supported, contradicted and unknown. Published systems show the same weakness: a sound reasoner does not make the pipeline sound, because errors concentrate in the translation from text to logic.
 
 ## 7. Semantic loss (M5, stretch)
 
@@ -162,15 +170,24 @@ $$
 \mathcal{L}_{sem} = \mathcal{L}_{CE} \;-\; \lambda_s\,\log\!\!\sum_{i\in A_t} p_i \tag{8}
 $$
 
-This follows the idea of a *semantic loss* (Xu et al., 2018). The reference should be confirmed before it is cited in a final version, and the gradient added in `backward` before the head gradients. Only attempt it after M1–M4 are measured.
+This follows the *semantic loss* of Xu et al. (2018), in the categorical form of Ahmed et al. (2023, Eq. 3). The gradient is added in `backward` before the head gradients. Only attempt it after M1–M4 are measured.
+
+Three properties follow from the formula (our derivations, checked numerically on small cases, not on the transformer):
+
+- **It is deterministic.** The same logits always give the same value. It does not add randomness, and it does not remove any.
+- **Where the target is allowed, it re-weights what cross-entropy already optimises.** $\mathcal{L}_{CE} = $ masked CE $+ (-\log P_A)$, so at those positions it changes the speed of learning, not the optimum. Its distinct value needs contexts the data does not settle.
+- **Where data and rule conflict, it stays finite.** The optimum at one context keeps banned mass $f_B/(1+\lambda_s)$, where $f_B$ is the banned tokens' frequency in the data. Masked CE at the same position would be infinite.
 
 ## 8. Limits to state in any result
 
-1. **Whole-word tokens only.** With about 1000 merges, frequent words are single tokens, but a word split into several BPE tokens is constrained only on its first token. A banned word can leak through its continuation tokens.
-2. **Small, hand-authored KB.** It covers a toy domain. It shows the mechanism and says nothing about open-domain knowledge, where the knowledge itself is the hard problem.
+1. **Whole-word tokens only.** A word that BPE splits into several tokens is reported as `unenforceable` and never partly banned (chapter 07). A banned word can also leak if it is spelled from other tokens, and every single-token word in the probe vocabulary could be. P1 therefore covers token IDs, not words.
+2. **Small, hand-authored KB.** It shows the mechanism and says nothing about open-domain knowledge, where the knowledge itself is the hard problem. The guarantee is relative to the KB: a gap becomes a false pass, and a wrong rule is enforced absolutely. Report how many positions were constrained.
 3. **A mask is not understanding.** It prevents a class of outputs. It does not give the network a concept of the constraint, and the weights are unchanged.
 4. **Trace scope.** The trace explains the symbolic decision, not the network's logits.
 5. **No KV cache.** Generation recomputes the full forward pass per token, which is fine at this size.
+6. **It does not settle the choice among allowed tokens.** Neither the mask nor the semantic loss says which valid token is right.
+7. **Randomness stays.** Weight initialisation and top-p sampling are both still there. A fixed seed makes a run repeatable, not justified (chapter 03 §7).
+8. **Verifier scope.** It reports only on what it could parse (§6).
 
 ## 9. Falsifiable predictions
 
@@ -180,5 +197,8 @@ This follows the idea of a *semantic loss* (Xu et al., 2018). The reference shou
 | P2 | With the processor off, output equals the unconstrained baseline at the same seed | unit test | any difference |
 | P3 | The unconstrained model violates the KB at a non-trivial rate | E2 | rate near 0 (then the symbolic layer has little to fix on this corpus) |
 | P4 | Seeds give similar loss but different weights | E1 | seeds agree closely in weights |
+| P5 | Semantic loss lowers the network's own forbidden mass | E4 | not lower, with the mask off |
+| P6 | Semantic loss reduces solution ambiguity across seeds but not weight ambiguity | E4 | divergence of $(P_A, 1-P_A)$ does not shrink, or weight cosine rises close to 1 |
+| P7 | The cost on unconstrained text is small | E4 | a large rise in perplexity where no rule fires |
 
-P1 and P2 are properties of the construction and should hold; P3 and P4 are empirical and may fail.
+P1 and P2 are properties of the construction and should hold, so P1 tests the implementation, not the model or the KB. P3 to P7 are empirical and may fail. The measurements for P5–P7 are in the [progress README](README.md#predictions-that-would-show-it-working-also-listed-in-chapter-04-9). M2 has no prediction yet, so nothing can currently refute it.

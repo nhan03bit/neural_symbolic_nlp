@@ -21,7 +21,8 @@ import { join } from "node:path";
 import { applyMerges } from "../../server/lib/bpe.js";
 import { cosineSimilarity } from "../../server/lib/math.js";
 import { mulberry32 } from "../../server/lib/rng.js";
-import { BPE_MERGES, buildVocab, CORPUS, tokenize } from "./corpus.js";
+import type { EmbedDataset } from "./corpus.js";
+import { buildVocab, LAW_DATASET, mergesFor, tokenize } from "./corpus.js";
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -66,20 +67,24 @@ type TrainOpts = {
   save?: boolean;
   /** Seeds init, shuffling and negative sampling. Defaults to 42. */
   seed?: number;
+  /** Corpus, BPE budget and analogy probes. Defaults to the civil-law dataset. */
+  dataset?: EmbedDataset;
 };
 
 export async function* trainSkipGram(
   opts: TrainOpts,
 ): AsyncGenerator<InitResult | EpochResult | TrainEmbedResult> {
   const { words, epochs, dimensions: dim, windowSize, negativeSamples } = opts;
-  const { wordToIndex, indexToWord, freq } = buildVocab(CORPUS);
+  const dataset = opts.dataset ?? LAW_DATASET;
+  const merges = mergesFor(dataset);
+  const { wordToIndex, indexToWord, freq } = buildVocab(dataset);
   const vocabSize = indexToWord.length;
   const rand = mulberry32(opts.seed ?? 42);
 
   // Build training pairs: (target, context) indices
   const pairs: [number, number][] = [];
-  for (const sentence of CORPUS) {
-    const tokens = tokenize(sentence);
+  for (const sentence of dataset.sentences) {
+    const tokens = tokenize(sentence, dataset);
     const indicies = tokens
       .map((w) => wordToIndex.get(w)!)
       .filter((i) => i !== undefined) as number[];
@@ -98,7 +103,7 @@ export async function* trainSkipGram(
   yield {
     vocabSize,
     embeddingDim: dim,
-    sentenceCount: CORPUS.length,
+    sentenceCount: dataset.sentences.length,
     windowSize,
     totalPairs: pairs.length,
   };
@@ -231,7 +236,7 @@ export async function* trainSkipGram(
     const idx = wordToIndex.get(word.toLowerCase());
 
     if (idx === undefined) {
-      const bpeTokens = applyMerges(word.toLowerCase(), BPE_MERGES);
+      const bpeTokens = applyMerges(word.toLowerCase(), merges);
       warnings.push(
         `${word} is not a single BPE token - it splits into [${bpeTokens.join(", ")}]`,
       );
@@ -281,15 +286,7 @@ export async function* trainSkipGram(
   }
 
   // Vector analogies: a - b + c ≈ ?
-  const ANALOGIES: [string, string, string][] = [
-    ["king", "man", "woman"],
-    ["queen", "woman", "man"],
-    ["prince", "boy", "girl"],
-    ["kitten", "cat", "dog"],
-    ["puppy", "dog", "cat"],
-    ["he", "man", "woman"],
-    ["his", "man", "woman"],
-  ];
+  const ANALOGIES = dataset.analogies;
 
   const analogies: Analogy[] = [];
   for (const [a, b, c] of ANALOGIES) {
@@ -334,7 +331,8 @@ export async function* trainSkipGram(
     type: "word2vec-skipgram" as const,
     dimensions: dim,
     vocab: indexToWord,
-    merges: BPE_MERGES.map((m) => ({ pair: m.pair, merged: m.merged })),
+    corpus: dataset.name,
+    merges: merges.map((m) => ({ pair: m.pair, merged: m.merged })),
     embeddings: Object.fromEntries(
       indexToWord.map((word, i) => [word, getVector(i)]),
     ),

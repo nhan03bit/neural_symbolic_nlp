@@ -827,7 +827,7 @@ Training is **full-batch**: one Adam step per epoch on the summed gradient of ev
 | `.data/embedding-weights.json` | `trainSkipGram` (`save !== false`) | — | `{type:"word2vec-skipgram", vocab, merges, embeddings}` |
 | `.data/transformer-weights-e{E}-l{N}-d{D}-h{H}-ff{F}-ctx{C}.json` | `serializeModel` (every 100 epochs and at the end) | `tryLoadWeights` | `{type:"decoder-transformer", config, vocab, merges, weights}`, values rounded to 6 d.p. |
 
-The transformer filename encodes the configuration, so the file acts as a cache key: a request with the same `epochs` and `numLayers` loads the file and skips training. Two limits follow. The key does not include the seed or a hash of the code, so a checkpoint written before a bug fix is served again after it. After fixing the defects in section 9, delete the `transformer-weights-*` files.
+The transformer filename encodes the configuration, so the file acts as a cache key: a request with the same `epochs` and `numLayers` loads the file and skips training. Two limits follow. The key does not include the seed, and it holds no hash of the code: `MODEL_VERSION` in `train.ts` must be raised by hand whenever a change makes saved weights invalid.
 
 ### 6.8 Generation
 
@@ -1010,9 +1010,9 @@ The same `App` shell serves every stage. A page differs only in the hook passed 
 
 ## 9. Defects found while drawing the diagrams
 
-Following each forward step to its backward counterpart (§6.3–6.5) shows three places where they do not match. They are listed for the owner and **not changed** in this chapter. Each one would make a finite-difference gradient check fail.
+Following each forward step to its backward counterpart (§6.3–6.5) showed three places where they did not match. All three were fixed on 2026-11-02, and the five verification gates in `tests/train-transformer.test.ts` now pass. The table is kept as the record of what the recorded baseline contained.
 
-| # | Location | Code now | Should be | Effect |
+| # | Location | Code before the fix | Fixed to | Effect |
 |---|---|---|---|---|
 | D1 | `transformer.ts:494` (`blockForward`, residual 1) | `x1[i] = input[i] * attnOut[i]` | `input[i] + attnOut[i]` | The residual becomes a product. `blockBackward` assumes a sum (`dInput = dX1 + …`), so the forward and backward passes no longer describe the same function. |
 | D2 | `transformer.ts:482` (`blockForward`, weighted sum of V) | `for (let j = 0; j < i; j++)` | `j <= i` | Each token cannot attend to itself, and position 0 gets an all-zero attention output. The backward pass (`j <= i`) rebuilds `attnVals` differently from the forward pass. |
@@ -1021,7 +1021,7 @@ Following each forward step to its backward counterpart (§6.3–6.5) shows thre
 Housekeeping, lower priority:
 
 - `train-worker.mjs` is tracked by git, but `train.ts` writes and loads `.train-worker.mjs` (the esbuild output). The tracked file is a stale bundle. Consider deleting it and adding `.train-worker.mjs` to `.gitignore`.
-- The checkpoint cache key (§6.7) does not include a code version. Delete `.data/transformer-weights-*.json` after fixing D1–D3, or old weights will be served as "cached".
+- Weights filenames (§6.7) now include `MODEL_VERSION`, so weights from before the D1–D3 fixes are ignored rather than served as cached. They remain in `.data`; removing them is the owner's call.
 - Chapters 02 §7 and 05 §1.2–1.3 still say the transformer does not compile and that `train.ts` is not written. Both are out of date relative to this chapter.
 
 ## 10. Design patterns used

@@ -189,7 +189,7 @@ function blockForward(input, bw, cfg2) {
     for (let i = 0; i < S; i++) {
       for (let d = 0; d < headDim; d++) {
         let sum = 0;
-        for (let j = 0; j < i; j++) {
+        for (let j = 0; j <= i; j++) {
           sum += weights[i * S + j] * Va[j * D + h * headDim + d];
         }
         attnVals[i * D + h * headDim + d] = sum;
@@ -199,7 +199,7 @@ function blockForward(input, bw, cfg2) {
   const attnOut = matmul(attnVals, bw.wO, S, D, D);
   addBias(attnOut, bw.bO, S, D);
   const x1 = new Float32Array(S * D);
-  for (let i = 0; i < S * D; i++) x1[i] = input[i] * attnOut[i];
+  for (let i = 0; i < S * D; i++) x1[i] = input[i] + attnOut[i];
   const ln2Mean = new Float32Array(S);
   const ln2Var = new Float32Array(S);
   const ln2Hat = new Float32Array(S * D);
@@ -326,7 +326,7 @@ function blockBackward(dOutput, bc, bw, cfg2, bg) {
       for (let j = 0; j <= i; j++) {
         for (let d = 0; d < headDim; d++) {
           dQ[i * D + h * headDim + d] += dScores[i * S + j] * bc.K[j * D + h * headDim + d];
-          dK[j * D + h * headDim + d] += dScores[i * S + j] * bc.K[i * D + h * headDim + d];
+          dK[j * D + h * headDim + d] += dScores[i * S + j] * bc.Q[i * D + h * headDim + d];
         }
       }
     }

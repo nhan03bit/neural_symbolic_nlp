@@ -21,6 +21,7 @@ import type {
   TransformerConfig,
   TransformerWeights,
 } from "./transformer";
+import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { cpus } from "node:os";
 import { join } from "node:path";
@@ -29,7 +30,22 @@ import { Worker } from "node:worker_threads";
 import { buildSync } from "esbuild";
 
 import { applyMerges, trainBpeOnText } from "../../server/lib/bpe";
-import { STORIES } from "../train-embed/corpus";
+import { CIVIL_LAW_DEFINITIONS, STORIES } from "../train-embed/corpus";
+
+/**
+ * Part of every weights filename. Raise it when a change to transformer.ts or to the tokeniser
+ * makes saved weights invalid, so they are retrained instead of served as cached. The corpus hash
+ * covers only the text, so it does not catch a tokeniser change. Filenames without a version hold
+ * weights trained with defects D1-D3 (docs/progress/05, section 1.2). v2 weights use the older
+ * 807-token vocabulary of word pieces, and v3 weights use a vocabulary with a separate "s" token.
+ */
+export const MODEL_VERSION = "v4";
+
+/** Training text: each civil-law definition as a sentence, then the dispute stories that use those terms. */
+export const TRAIN_TEXTS = [
+  ...CIVIL_LAW_DEFINITIONS.map((d) => `${d}.`),
+  ...STORIES,
+];
 import { resetRand } from "./matrix";
 import {
   adamUpdate,
@@ -117,6 +133,27 @@ async function tryLoadWeights(
   }
 }
 
+/**
+ * Load the weights saved at one epoch of a finished run.
+ *
+ * Checkpoint filenames have no corpus fingerprint and later runs overwrite them, so a checkpoint
+ * only counts if its training log is the start of this run's log and ends at that epoch.
+ */
+async function loadCheckpoint(
+  path: string,
+  epoch: number,
+  runHistory: EpochResult[],
+): Promise<TransformerWeights | null> {
+  const checkpoint = await tryLoadWeights(path);
+  if (!checkpoint || checkpoint.history.at(-1)?.epoch !== epoch) return null;
+  const sameRun = checkpoint.history.every(
+    (entry, i) =>
+      entry.epoch === runHistory[i]?.epoch &&
+      entry.loss === runHistory[i]?.loss,
+  );
+  return sameRun ? checkpoint.weights : null;
+}
+
 export type InitResult = {
   vocabSize: number;
   contextLen: number;
@@ -149,6 +186,8 @@ type TrainOpts = {
   topP: number;
   numLayers: number;
   maxTokens: number;
+  /** Stops training at the next epoch, for example when the client disconnects. */
+  signal?: AbortSignal;
 };
 
 /** Bundle the train-worker.ts entry point with esbuild so it can be loaded as a Worker thread. */
@@ -170,6 +209,49 @@ function buildWorkerBundle(): string {
 }
 
 /**
+ * Train BPE on the corpus and number its tokens, most frequent first.
+ *
+ * The default runs BPE until every word is one token (it stops by itself at 1781 merges), so
+ * samples hold only corpus words, never pieces such as " h" or "or".
+ *
+ * Shared by the training route and tests/search-transformer.ts, so a searched config sees
+ * exactly the token ids the route would train on.
+ */
+export function buildVocabulary(numMerges = 2000) {
+  // A word keeps its apostrophe ending, so "ravi's" is one token. A separate "s" would be dropped
+  // without the optional whitespace, and with it could fuse onto any sampled word ("thes").
+  const PRE_TOKEN_RE = /\s?\w+(?:'\w+)*|[^\w\s]/g;
+  const corpusText = TRAIN_TEXTS.map((s) => ` ${s}`)
+    .join("")
+    .toLowerCase();
+  const { merges: bpeMerges } = trainBpeOnText(
+    corpusText,
+    numMerges,
+    PRE_TOKEN_RE,
+  );
+
+  function tokenize(text: string): string[] {
+    return applyMerges(` ${text}`.toLowerCase(), bpeMerges, PRE_TOKEN_RE);
+  }
+
+  const freq = new Map<string, number>();
+  for (const sentence of TRAIN_TEXTS) {
+    for (const tok of tokenize(sentence)) {
+      freq.set(tok, (freq.get(tok) ?? 0) + 1);
+    }
+  }
+
+  const indexToWord: string[] = [];
+  const wordToIndex = new Map<string, number>();
+  for (const [word] of [...freq.entries()].sort((a, b) => b[1] - a[1])) {
+    wordToIndex.set(word, indexToWord.length);
+    indexToWord.push(word);
+  }
+
+  return { bpeMerges, tokenize, indexToWord, wordToIndex };
+}
+
+/**
  * Train a decoder-only transformer from scratch — the main training pipeline.
  *
  * Steps:
@@ -188,30 +270,7 @@ export async function* trainTransformer(
   const { epochs, temperature, topP, numLayers, maxTokens } = opts;
   resetRand();
 
-  const PRE_TOKEN_RE = /\s\w+|[^\w\s]/g;
-  const corpusText = STORIES.map((s) => `${s}`)
-    .join("")
-    .toLowerCase();
-  const { merges: bpeMerges } = trainBpeOnText(corpusText, 1000, PRE_TOKEN_RE);
-
-  function tokenize(text: string): string[] {
-    return applyMerges(` ${text}`.toLowerCase(), bpeMerges, PRE_TOKEN_RE);
-  }
-
-  const freq = new Map<string, number>();
-  for (const sentence of STORIES) {
-    for (const tok of tokenize(sentence)) {
-      freq.set(tok, (freq.get(tok) ?? 0) + 1);
-    }
-  }
-
-  const indexToWord: string[] = [];
-  const wordToIndex = new Map<string, number>();
-  for (const [word] of [...freq.entries()].sort((a, b) => b[1] - a[1])) {
-    wordToIndex.set(word, indexToWord.length);
-    indexToWord.push(word);
-  }
-
+  const { bpeMerges, tokenize, indexToWord, wordToIndex } = buildVocabulary();
   const vocabSize = indexToWord.length;
 
   const cfg: TransformerConfig = {
@@ -224,12 +283,14 @@ export async function* trainTransformer(
   };
 
   const allTokenIds: number[] = [];
-  for (const setence of STORIES) {
+  for (const setence of TRAIN_TEXTS) {
     for (const tok of tokenize(setence)) {
       const idx = wordToIndex.get(tok);
       if (idx !== undefined) allTokenIds.push(idx);
     }
   }
+
+  const seedIds = allTokenIds.slice(0, 3);
 
   const seqLen = Math.min(cfg.contextLen, 16);
   const sequences: { input: number[]; target: number[] }[] = [];
@@ -240,8 +301,21 @@ export async function* trainTransformer(
     });
   }
 
-  const weightsFilename = `transformer-weights-e${epochs}-l${numLayers}-d${cfg.embDim}-h${cfg.numHeads}-ff${cfg.ffDim}-ctx${cfg.contextLen}.json`;
+  // The corpus fingerprint keeps weights trained on one training text from being reloaded
+  // for another (the vocabulary and token ids would no longer match).
+  const corpusHash = createHash("sha256")
+    .update(TRAIN_TEXTS.join("\n"))
+    .digest("hex")
+    .slice(0, 8);
+  const weightsFilename = `transformer-weights-e${epochs}-l${numLayers}-d${cfg.embDim}-h${cfg.numHeads}-ff${cfg.ffDim}-ctx${cfg.contextLen}-c${corpusHash}-${MODEL_VERSION}.json`;
   const weightsPath = join(process.cwd(), ".data", weightsFilename);
+
+  const checkpointPath = (epoch: number) =>
+    join(
+      process.cwd(),
+      ".data",
+      `transformer-weights-e${epoch}-l${numLayers}-d${cfg.embDim}-h${cfg.numHeads}-ff${cfg.ffDim}-ctx${cfg.contextLen}-${MODEL_VERSION}.json`,
+    );
 
   const cached = await tryLoadWeights(weightsPath);
   if (cached) {
@@ -257,7 +331,7 @@ export async function* trainTransformer(
       totalParams: countParams(w),
       temperature,
       topP,
-      corpusSentences: STORIES.length,
+      corpusSentences: TRAIN_TEXTS.length,
       trainingSequences: sequences.length,
     };
 
@@ -268,15 +342,42 @@ export async function* trainTransformer(
     }
     const finalLoss = totalLoss / sequences.length;
 
-    // Replay the saved training log so cached runs show the same epoch stream.
-    for (const entry of cached.history) yield entry;
+    // Saved samples used the settings of the original training run. Weights exist on disk only
+    // at checkpoints and at the end, so those are the epochs that can follow this request.
+    const lastEpoch = cached.history.at(-1)?.epoch;
+    const samples: { epoch: number; text: string }[] = [];
+    for (const entry of cached.history) {
+      const weightsAtEpoch =
+        entry.epoch === lastEpoch
+          ? w
+          : entry.epoch % 100 === 0
+            ? await loadCheckpoint(
+                checkpointPath(entry.epoch),
+                entry.epoch,
+                cached.history,
+              )
+            : null;
+      const sample = weightsAtEpoch
+        ? generateText(
+            weightsAtEpoch,
+            cfg,
+            seedIds,
+            maxTokens,
+            indexToWord,
+            temperature,
+            topP,
+            seqLen,
+          )
+        : entry.sample;
+      if (sample !== undefined)
+        samples.push({ epoch: entry.epoch, text: sample });
+      yield { ...entry, sample };
+    }
 
     yield {
       architecture: `Decoder-Only Transformer (${cfg.numLayers} layers, ${cfg.embDim}d, ${cfg.numHeads}h, ${cfg.ffDim}ff) — cached`,
       finalLoss: Math.round(finalLoss * 1000000) / 1000000,
-      samples: cached.history.flatMap((e) =>
-        e.sample === undefined ? [] : [{ epoch: e.epoch, text: e.sample }],
-      ),
+      samples,
     };
     return;
   }
@@ -294,11 +395,12 @@ export async function* trainTransformer(
     totalParams: countParams(w),
     temperature,
     topP,
-    corpusSentences: STORIES.length,
+    corpusSentences: TRAIN_TEXTS.length,
     trainingSequences: sequences.length,
   };
 
   const step = 10;
+  const earlyEpochs = 10;
   const sampleEvery = 10;
   const lr = 0.001;
   const serializedMerges = bpeMerges.map((m) => ({
@@ -307,7 +409,6 @@ export async function* trainTransformer(
   }));
   const collectedSamples: { epoch: number; text: string }[] = [];
   const history: EpochResult[] = [];
-  const seedIds = allTokenIds.slice(0, 3);
 
   const { layout, totalFloats } = computeLayout(cfg);
   const weightSab = packWeightsToSab(w, layout, totalFloats);
@@ -320,105 +421,108 @@ export async function* trainTransformer(
   const workerGradSabs: SharedArrayBuffer[] = [];
   const workers: Worker[] = [];
 
-  for (let i = 0; i < numWorkers; i++) {
-    const workerSeqs = sequences.slice(
-      i * seqsPerWorker,
-      (i + 1) * seqsPerWorker,
-    );
-    const gradSab = new SharedArrayBuffer(totalFloats * 4);
-    workerGradSabs.push(gradSab);
+  // Workers must not outlive this generator: a return from the abort check, a consumer
+  // breaking out of the stream, or an error all leave through this finally.
+  try {
+    for (let i = 0; i < numWorkers; i++) {
+      const workerSeqs = sequences.slice(
+        i * seqsPerWorker,
+        (i + 1) * seqsPerWorker,
+      );
+      const gradSab = new SharedArrayBuffer(totalFloats * 4);
+      workerGradSabs.push(gradSab);
 
-    const worker = new Worker(workerPath, {
-      workerData: {
-        weightSab,
-        gradSab,
-        layout,
-        cfg,
-        sequences: workerSeqs,
-        seqLen,
-      },
-    });
-    workers.push(worker);
-  }
+      const worker = new Worker(workerPath, {
+        workerData: {
+          weightSab,
+          gradSab,
+          layout,
+          cfg,
+          sequences: workerSeqs,
+          seqLen,
+        },
+      });
+      workers.push(worker);
+    }
 
-  await Promise.all(
-    workers.map(
-      (worker) =>
-        new Promise<void>((resolve) => {
-          worker.once("message", (msg: { type: string }) => {
-            if (msg.type === "ready") resolve();
-          });
-        }),
-    ),
-  );
-
-  const grads = zeroGrads(cfg);
-
-  const wShared = createWeightViews(weightSab, layout, cfg.numLayers);
-
-  for (let epoch = 0; epoch <= epochs; epoch++) {
-    const results = await Promise.all(
+    await Promise.all(
       workers.map(
         (worker) =>
-          new Promise<{ loss: number }>((resolve) => {
-            worker.once("message", (msg: { type: string; loss: number }) => {
-              if (msg.type === "done") resolve({ loss: msg.loss });
+          new Promise<void>((resolve) => {
+            worker.once("message", (msg: { type: string }) => {
+              if (msg.type === "ready") resolve();
             });
-            worker.postMessage({ type: "compute" });
           }),
       ),
     );
 
-    let totalLoss = 0;
-    for (const r of results) totalLoss += r.loss;
+    const grads = zeroGrads(cfg);
 
-    sumGradsFromWorkers(grads, workerGradSabs, layout);
-    adamUpdate(wShared, grads, adamBuf, lr, epoch + 1);
+    const wShared = createWeightViews(weightSab, layout, cfg.numLayers);
 
-    const loss = totalLoss / sequences.length;
+    for (let epoch = 0; epoch <= epochs; epoch++) {
+      if (opts.signal?.aborted) return;
 
-    if (epoch % step === 0 || epoch === epochs) {
-      let sample: string | undefined;
-      if (epoch % sampleEvery === 0 || epoch === epochs) {
-        copyWeightsFromSab(weightSab, layout, w);
-        sample = generateText(
-          w,
-          cfg,
-          seedIds,
-          maxTokens,
-          indexToWord,
-          temperature,
-          topP,
-          seqLen,
-        );
-        collectedSamples.push({ epoch, text: sample });
+      const results = await Promise.all(
+        workers.map(
+          (worker) =>
+            new Promise<{ loss: number }>((resolve) => {
+              worker.once("message", (msg: { type: string; loss: number }) => {
+                if (msg.type === "done") resolve({ loss: msg.loss });
+              });
+              worker.postMessage({ type: "compute" });
+            }),
+        ),
+      );
+
+      let totalLoss = 0;
+      for (const r of results) totalLoss += r.loss;
+
+      sumGradsFromWorkers(grads, workerGradSabs, layout);
+      adamUpdate(wShared, grads, adamBuf, lr, epoch + 1);
+
+      const loss = totalLoss / sequences.length;
+
+      // A full-batch epoch can take many seconds, so the first epochs all report: otherwise a
+      // long run shows epoch 0 and then nothing for a minute or more, which looks like a hang.
+      if (epoch <= earlyEpochs || epoch % step === 0 || epoch === epochs) {
+        let sample: string | undefined;
+        if (epoch % sampleEvery === 0 || epoch === epochs) {
+          copyWeightsFromSab(weightSab, layout, w);
+          sample = generateText(
+            w,
+            cfg,
+            seedIds,
+            maxTokens,
+            indexToWord,
+            temperature,
+            topP,
+            seqLen,
+          );
+          collectedSamples.push({ epoch, text: sample });
+        }
+
+        const entry: EpochResult = {
+          epoch,
+          loss: Math.round(loss * 1000000) / 1000000,
+          sample,
+        };
+        history.push(entry);
+        yield entry;
+        await tick();
       }
 
-      const entry: EpochResult = {
-        epoch,
-        loss: Math.round(loss * 1000000) / 1000000,
-        sample,
-      };
-      history.push(entry);
-      yield entry;
-      await tick();
+      if (epoch > 0 && epoch % 100 === 0) {
+        copyWeightsFromSab(weightSab, layout, w);
+        await writeFile(
+          checkpointPath(epoch),
+          `${JSON.stringify(serializeModel(w, cfg, indexToWord, serializedMerges, history), null, 2)}\n`,
+        );
+      }
     }
-
-    if (epoch > 0 && epoch % 100 === 0) {
-      copyWeightsFromSab(weightSab, layout, w);
-      const checkpointPath = join(
-        process.cwd(),
-        ".data",
-        `transformer-weights-e${epoch}-l${numLayers}-d${cfg.embDim}-h${cfg.numHeads}-ff${cfg.ffDim}-ctx${cfg.contextLen}.json`,
-      );
-      await writeFile(
-        checkpointPath,
-        `${JSON.stringify(serializeModel(w, cfg, indexToWord, serializedMerges, history), null, 2)}\n`,
-      );
-    }
+  } finally {
+    await Promise.all(workers.map((worker) => worker.terminate()));
   }
-
-  await Promise.all(workers.map((worker) => worker.terminate()));
 
   copyWeightsFromSab(weightSab, layout, w);
 
