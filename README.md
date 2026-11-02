@@ -24,7 +24,7 @@ A from-scratch TypeScript pipeline (no ML libraries) that climbs from a rule-bas
 | 5     | Symbolic layer (mask, verifier, trace) | **Designed only**                                           |
 | 6     | Experiments E1–E3 on the transformer  | **Not run, no results**                                     |
 
-Only stages 2 and 3 have measured results; the transformer trains, but no experiment has been run on it yet. Every number measured in this project comes from code, not typed in by hand: XOR and the seed comparison from `bun tests/ieee-data.ts`, the civil-law Skip-gram from the saved model (`.data/embedding-weights.json`). Figures quoted from papers are attributed to them.
+Stages 2 and 3 have measured results. The transformer has a recorded training baseline (see PRE TRAINING below), but no experiment has been run on it yet. Every number measured in this project comes from code, not typed in by hand: XOR and the seed comparison from `bun tests/ieee-data.ts`, the civil-law Skip-gram from the saved model (`.data/embedding-weights.json`). Figures quoted from papers are attributed to them.
 
 ## What was measured
 
@@ -98,7 +98,7 @@ x'' = x' + W2 · ReLU(W1 · LN2(x') + b1) + b2
 
 ![Transformer block](docs/images/fig-transformer-block.png)
 
-Config: context 32 (training windows of 16 tokens), d = 32, 2 heads, feed-forward width 128, 1–6 layers (default 2), Adam lr 0.001, one full-batch step per epoch. That is **12,704 parameters per block**. With the whole-word BPE vocabulary built from the civil-law text (937 tokens, 1781 merges) the model has 87,401 parameters at 2 layers and 138,217 at 6. The recorded baseline below predates this vocabulary and used 807 tokens (1000 merges). Training signal is next-token cross-entropy, nothing else.
+Config: context 32 (training windows of 16 tokens), d = 32, 2 heads, feed-forward width 128, 1–6 layers (default 2), Adam lr 0.001, one full-batch step per epoch. That is **12,704 parameters per block**. With the whole-word BPE vocabulary built from the civil-law text (937 tokens, 1781 merges) the model has 87,401 parameters at 2 layers and 138,217 at 6. The baseline below uses this vocabulary. Training signal is next-token cross-entropy, nothing else.
 
 Implementation, in `src/routes/train-transformer/`:
 
@@ -178,7 +178,7 @@ Four predictions the design must survive:
 
 ## PRE TRAINING: the baseline before the symbolic layer
 
-This is the reference point for comparison. Everything here was trained by next-token or context prediction alone, with **no** knowledge base, mask, bias, trace, verifier or semantic loss. When the neuro-symbolic layer is built, the same commands and settings are run again and compared with this section. Recorded 2026-10-31 on the working tree of commit `c42da07`.
+This is the reference point for comparison. Everything here was trained by next-token or context prediction alone, with **no** knowledge base, mask, bias, trace, verifier or semantic loss. When the neuro-symbolic layer is built, the same commands and settings are run again and compared with this section. The Skip-gram was recorded on 2026-10-31 on the working tree of commit `c42da07`. The transformer was recorded on 2026-11-02 with the source at commit `f4a3926`.
 
 ### What was measured
 
@@ -220,15 +220,67 @@ Analogies: 0 of 5 correct (the table is in the Skip-gram section above).
 
 </details>
 
-**Transformer (stage 4)**: 300 epochs, 2 layers, temperature 0.8, top-p 0.9, 40 tokens, run headless through `trainTransformer` (710 s on 10 cores).
+**Transformer (stage 4)**: 2000 epochs, 2 layers, temperature 1, top-p 0.6, 20 tokens, seed 42, sent from the Train Transformer page as `2000 1 0.6 2 20` (about 86 minutes, estimated from checkpoint timestamps). This replaces the earlier 300-epoch run, as the guardrail below requires, because `transformer.ts` and the vocabulary have changed.
 
 | Measure | Value |
 | ------- | ----- |
 | Training text | 256 items (222 definitions + 34 stories) |
+| Vocabulary | 937 tokens (1781 BPE merges, one token per word or punctuation mark) |
+| Parameters | 87,401 |
+| Training windows | 5,374 windows of 16 tokens |
+| Loss at epoch 0 | 6.868 (ln 937 = 6.843, a uniform guess, as expected) |
+| Loss at epochs 100, 300, 500, 1000, 1500 | 4.850, 2.217, 1.051, 0.391, 0.287 |
+| Lowest logged loss | 0.248 at epoch 1980 |
+| Final loss, epoch 2000 | 0.2489 (perplexity ≈ 1.28) |
+| Held-out loss | Not measured: this run trained on all 256 items |
+
+Sample at epoch 2000, prompt `the claimant is`:
+
+> the claimant is the person who brings a claim. the defendant is the person who answers a claim. the claimant asks
+
+**This loss shows memorisation, not generalisation.** The whole sample above is an unbroken stretch of the training text. As the loss falls, the samples turn into copies:
+
+| Epochs | Samples | Generated tokens copied, mean | Samples entirely copied |
+| ------ | ------- | ----------------------------- | ----------------------- |
+| 0–300 | 31 | 0.0% | 0 |
+| 310–500 | 20 | 5.5% | 0 |
+| 510–1000 | 50 | 79.7% | 0 |
+| 1010–1500 | 50 | 99.5% | 15 |
+| 1510–2000 | 50 | 100% | 38 |
+
+A token counts as copied if it sits inside a run of 8 or more tokens found verbatim in the training token stream. Samples are the ones saved every 10 epochs in the weights file's history.
+
+**Fluent text is not always correct.** Samples from earlier in the run state definitions that are not in the corpus and contradict its definition of a claimant as "the person who brings a claim":
+
+> the claimant is the person who owns the home. the tenant is the person who rents the home. the landlord gets *(epochs 1000 and 1370)*
+>
+> the claimant is the person who rents the home. the landlord gets the rent. the tenant pays the rent. the *(epoch 1380)*
+
+These samples, from one seed, show that this happens, not how often. Measuring the rate is E2's job.
+
+Weights: `.data/transformer-weights-e2000-l2-d32-h2-ff128-ctx32-cbf9d5315-v4.json`. Replaying them through the cached path gives a final loss of 0.248851.
+
+<details>
+<summary>Screenshots of the run</summary>
+
+![Architecture for 2000 1 0.6 2 20: vocabulary 937, 87,401 parameters, 5,374 sequences](docs/images/pretrain-transformer-config.png)
+![Training loss from epoch 80 to epoch 350](docs/images/pretrain-transformer-loss.png)
+![Samples at epochs 1370, 1380 and 1390](docs/images/pretrain-transformer-samples.png)
+![Sample at epoch 2000 and final loss 0.2489](docs/images/pretrain-transformer-final.png)
+
+</details>
+
+<details>
+<summary>Superseded baseline: 300 epochs, with defects D1–D3 present (2026-10-31)</summary>
+
+Kept as the record of the transformer before its fixes. Do not compare new runs with it. It ran headless through `trainTransformer` at temperature 0.8, top-p 0.9 and 40 tokens (710 s on 10 cores), on commit `c42da07`.
+
+| Measure | Value |
+| ------- | ----- |
 | Vocabulary | 807 tokens (1000 BPE merges) |
 | Parameters | 78,951 |
 | Training windows | 6,431 windows of 16 tokens |
-| Loss at epoch 0 | 6.717 (ln 807 = 6.693, a uniform guess, as expected) |
+| Loss at epoch 0 | 6.717 (ln 807 = 6.693) |
 | Lowest loss | 5.637 at epoch 210 |
 | Final loss, epoch 300 | 5.678 (perplexity ≈ 292) |
 
@@ -236,31 +288,34 @@ Sample at epoch 300, prompt `the claimant is`:
 
 > the claimant is. the and. six.. on of to track the the. takes of of founds tenant usually. th needs. fromy paid you tenant did the the t to learner. agreement. she
 
-The loss stops falling after about 100 epochs and the text is domain words in no order. That is the result to expect from the three forward/backward defects present at the time, since fixed (the first residual multiplies instead of adds, attention skips the token itself, the K gradient uses `K`). **This baseline measures the transformer with those defects.** Weights: `.data/transformer-weights-e300-l2-d32-h2-ff128-ctx32-cbf9d5315.json`.
+The loss stops falling after about 100 epochs and the text is domain words in no order, as expected from the three forward/backward defects present at the time, since fixed (the first residual multiplied instead of adding, attention skipped the token itself, the K gradient used `K`). Weights: `.data/transformer-weights-e300-l2-d32-h2-ff128-ctx32-cbf9d5315.json`.
+
+</details>
 
 ### What this baseline does not include
 
 - No symbolic component of any kind (M1–M5 are all off).
-- No fix to `transformer.ts`; the defects above are part of what is measured.
-- One seed only. The Skip-gram and the transformer use different BPE settings (5000 against 1000 merges), so their vocabularies (924 against 807) are not comparable with each other. Compare each model only with its own neuro-symbolic run.
+- No held-out score: the transformer trained on all the text, so its loss says nothing about unseen text.
+- One seed only. The Skip-gram and the transformer use different BPE settings (5000 against 2000 merges requested), so their vocabularies (924 against 937) are not comparable with each other. Compare each model only with its own neuro-symbolic run.
 
 ### Risks to a fair comparison, and the guardrail for each
 
 | Risk | Guardrail |
 | ---- | --------- |
-| `transformer.ts` is fixed before the neuro-symbolic run, so any gain comes from the fix, not the symbolic layer | If the code changes, re-run this baseline first and replace the numbers here |
+| `transformer.ts` or the tokeniser changes before the neuro-symbolic run, so any gain comes from that change, not the symbolic layer | If the code changes, raise `MODEL_VERSION`, re-run this baseline first and replace the numbers here |
+| A lower training loss is read as a better model, when this baseline shows it can mean more copying | Compare E2, E3 and the copied share as well as the loss |
 | The corpus changes | The transformer weights file name carries the corpus hash (`-cbf9d5315`); a different hash means a new baseline is needed |
-| Different epochs (the UI defaults to 10,000 Skip-gram epochs; the probe script defaults to 300) | Compare at the epochs recorded here |
+| Different epochs (the UI defaults to 10,000 Skip-gram epochs; the transformer route defaults to 300, and this baseline uses 2000) | Compare at the epochs recorded here |
 | A difference smaller than the seed-to-seed spread | Treat it as noise until E1 measures that spread |
-| The intermediate checkpoints (`…-e100-…json`, `…-e200-…json`) have no corpus hash in their names, so they can be mistaken for a different corpus's run | Use only the hashed final file as the baseline |
+| The intermediate checkpoints (`…-e100-…-v4.json`, `…-e200-…-v4.json`) have no corpus hash in their names, so they can be mistaken for a different corpus's run | Use only the hashed final file as the baseline |
 
 ### How to reproduce it
 
 1. Skip-gram: `bun run dev`, open `/train-embed`, send `claimant defendant landlord tenant`, and check that the four tables above come back.
 2. Skip-gram figure and analogies: `python3 docs/images/make_civil_law_figures.py`. It must print `renters (0.57)`, `return (0.65)`, `whether (0.61)`, `between (0.58)` and `proves (0.72)`.
-3. Transformer: delete the hashed weights file, then run
-   `curl -N -X POST localhost:5173/train-transformer -H 'content-type: application/json' -d '{"epochs":300,"temperature":0.8,"topP":0.9,"numLayers":2,"maxTokens":40}'`.
-   The recorded baseline reported vocabulary 807, 78,951 parameters and 6,431 sequences, loss 6.717273 at epoch 0 and a final loss of 5.677629. Those values no longer reproduce, because D1–D3 are fixed and the vocabulary has changed. The current code reports vocabulary 937, 87,401 parameters and 5,374 sequences for this command; its losses have not been recorded yet.
+3. Transformer: run
+   `curl -N -X POST localhost:5173/train-transformer -H 'content-type: application/json' -d '{"epochs":2000,"temperature":1,"topP":0.6,"numLayers":2,"maxTokens":20}'`.
+   With the hashed weights file present this replays the saved run in seconds. It should report vocabulary 937, 87,401 parameters, 5,374 sequences, loss 6.867592 at epoch 0 and a final loss of 0.248851. Delete that file to train again (about 86 minutes); this retraining has not been repeated yet.
 4. Regression check: `bun test tests/train-embed.test.ts` (5 pass).
 
 ### Comparison table (to fill in after the neuro-symbolic run)
@@ -269,13 +324,14 @@ The loss stops falling after about 100 epochs and the text is domain words in no
 | ------ | --------------------------- | -------------- |
 | Skip-gram analogies correct | 0 / 5 | — |
 | landlord ↔ tenant cosine | 0.59 | — |
-| Transformer final loss (300 epochs) | 5.678 | — |
+| Transformer final loss (2000 epochs) | 0.2489 | — |
+| Generated tokens copied from the corpus, epochs 1510–2000 | 100% | — |
 | Knowledge-base violation rate (E2) | not measured (needs the verifier) | — |
 | Banned-token probability mass, `massBefore` (E3) | not measured (needs the trace) | — |
 
 ## Not done yet
 
-1. **Re-run the baseline on the fixed transformer.** The five gates now pass (`tests/train-transformer.test.ts`): finite-difference gradient check (error < 10⁻³), initial loss ≈ ln V, overfit a single sequence, causal-mask test, same seed gives same weights. They needed three forward/backward fixes in `transformer.ts`, made on 2026-11-02 (see [architecture §9](docs/architecture.md#9-defects-found-while-drawing-the-diagrams)): the first residual multiplied instead of adding (line 494), attention skipped the token itself (`j < i`, line 482), and the gradient for K used `K` instead of `Q` (line 668). Older weights stay in `.data` but are not loaded, because filenames now carry `MODEL_VERSION`.
+1. **Measure the transformer on unseen text.** The baseline above is re-recorded on the fixed transformer, but it trained on all the text and its samples are copies. The search for the configuration that scores best on held-out stories (`tests/search-transformer.ts`) has not been run. The five gates pass (`tests/train-transformer.test.ts`): finite-difference gradient check (error < 10⁻³), initial loss ≈ ln V, overfit a single sequence, causal-mask test, same seed gives same weights. They needed three forward/backward fixes in `transformer.ts`, made on 2026-11-02 (see [architecture §9](docs/architecture.md#9-defects-found-while-drawing-the-diagrams)): the first residual multiplied instead of adding (line 494), attention skipped the token itself (`j < i`, line 482), and the gradient for K used `K` instead of `Q` (line 668). Older weights stay in `.data` but are not loaded, because filenames now carry `MODEL_VERSION`.
 2. **Build the symbolic layer** (`symbolic.ts`, `constraints.ts`, verifier).
 3. **Run E1–E3**: E1 seed sensitivity (weight and logit distance), E2 violation rate with the mask off and on, E3 one full trace. Until then, no claim is made about the transformer or the symbolic layer.
 4. **Rewrite `tests/ieee-data.ts` for the civil-law corpus.** It still measures king/queen/cat, so the seed comparison and the IEEE paper figures cannot be regenerated until it is.

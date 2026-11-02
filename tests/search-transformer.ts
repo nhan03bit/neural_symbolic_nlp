@@ -387,7 +387,15 @@ function top(round: string, count: number): Row[] {
   const list = ranked(round);
   if (list.length === 0)
     throw new Error(`Round ${round} has no results; run it first.`);
-  return list.slice(0, count).map((entry) => entry.rows[0]);
+  // Weight decay shrinks the weights by about 2% at most before early stopping, so configs that
+  // differ only in decay score within noise. Keeping both would leave later rounds comparing a
+  // model with itself, so only the best of each is kept.
+  const distinct = new Map<string, Row>();
+  for (const { rows } of list) {
+    const key = configKey({ ...rows[0], weightDecay: 0 });
+    if (!distinct.has(key)) distinct.set(key, rows[0]);
+  }
+  return [...distinct.values()].slice(0, count);
 }
 
 // ─── Rounds ──────────────────────────────────────────────────────────────────
