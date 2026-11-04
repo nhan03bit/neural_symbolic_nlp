@@ -2,46 +2,39 @@
 
 This chapter gives the code for `src/routes/neuro-symbolic/` as snippets that you copy in by hand. **Nothing here has been run.** Each snippet names the file it goes in and, where it changes existing code, the exact place. The order matters: the knowledge base comes first, because M1–M5 all read the allowed set $A_t$ from it.
 
-**Known mismatches with the current repo (2026-11-01). The snippets are unchanged and need these fixed before use.** Numbers marked "probe" come from a read-only script using the real tokenizer and these snippets. They are not recorded experiments.
+**Known mismatches with the current repo (2026-11-01; §2 updated 2026-11-03). Apart from §2, the snippets are unchanged and need these fixed before use.** Numbers marked "probe" come from a read-only script using the real tokenizer and these snippets. They are not recorded experiments.`
 
-| # | Mismatch | Effect | What to do |
-|---|---|---|---|
-| 1 | §2's knowledge base and triggers were written for the old story corpus | Probe: all 10 entities and 8 surface forms occur 0 times in the civil-law text, so `constrainedPositions` = 0, $\mathcal{L}_{sem}$ is always 0 and the mask never fires. The §9 tests use a synthetic vocabulary, so they still pass | Write a civil-law knowledge base first, and stop if the count is 0. Probe: 14 role words under a one-word trigger reach 132 of 6,447 positions (2.05%) |
-| 2 | §4 applies M5 only to labelled positions | Where the target is allowed, it changes learning speed, not the optimum | Decide whether to add unlabelled probe contexts with $\mathcal{L}_{sem}$ and no CE, and measure them for collapse |
-| 3 | §7's `liftCan` emits only `can` triples, and bans come only from `cannot` | Lifting cannot change $A_t$. Probe: top-1 probability peaks at 0.0985 against $\tau = 0.3$, on the defective baseline | Treat lifting as reporting only, or extend it with guards: freeze the original KB for the verifier, and hash the KB into the weights filename |
-| 4 | §2's `allowed()` closes the KB once and matches only the last words of the context | There is no forward chaining over the context | Describe it this way wherever it is reported |
-| 5 | §2's token index covers whole-word tokens | Probe: `creditor`, `buyer` and `seller` are split, and all 450 single-token words can also be spelled from other tokens | Scope P1 to token IDs, or compile a string-level automaton |
-| 6 | §6's verifier returns only violations | Zero violations looks the same as zero claims checked | Report claims parsed, and supported, contradicted and unknown |
-| 7 | §8's training options have no seed or KB hash | Seeds 1, 2 and 3 would reload seed 42's file | Add them to the options and the filename (chapter 05 §2) |
+| # | Mismatch                                                                              | Effect                                                                                                                                                                                                                                    | What to do                                                                                                                                             |
+| - | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1 | Fixed: §2's old story KB fired 0 times on the civil-law text | §2 now holds the civil-law KB, also in `src/routes/neural-symbolic/symbolic.ts`. Probe: 9 of 5,390 positions, 0 conflicts | Keep `tests/neural-symbolic-kb.test.ts` passing, since it runs on the real tokenizer. Stop if the firing count falls to 0 |
+| 2 | §4 applies M5 only to labelled positions                                             | Where the target is allowed, it changes learning speed, not the optimum                                                                                                                                                                   | Decide whether to add unlabelled probe contexts with $\mathcal{L}_{sem}$ and no CE, and measure them for collapse                                    |
+| 3 | §7's `liftCan` emits only `can` triples, and bans come only from `cannot`      | Lifting cannot change $A_t$. Probe: top-1 probability peaks at 0.0985 against $\tau = 0.3$, on the defective baseline                                                                                                                 | Treat lifting as reporting only, or extend it with guards: freeze the original KB for the verifier, and hash the KB into the weights filename          |
+| 4 | §2's `allowed()` closes the KB once and matches only the last words of the context | There is no forward chaining over the context                                                                                                                                                                                             | Describe it this way wherever it is reported                                                                                                           |
+| 5 | §2's token index covers whole-word tokens | Probe: all 8 roles and the KB's verbs are single tokens under the current tokenizer, and only 3 of 937 tokens lack a leading space. This can change with the vocabulary | Keep checking `unenforceable`, and repeat the check after any vocabulary change |
+| 6 | §6's verifier returns only violations                                                | Zero violations looks the same as zero claims checked                                                                                                                                                                                     | Report claims parsed, and supported, contradicted and unknown                                                                                          |
+| 7 | §8's training options have no seed or KB hash                                        | Seeds 1, 2 and 3 would reload seed 42's file                                                                                                                                                                                              | Add them to the options and the filename (chapter 05 §2)                                                                                              |
+| 8 | §6, §7 and §9 still use the old KB: `cannot`, `can`, `girl` and `fly` | With the new §2, `verify` always returns no violations and `liftCan` finds no conflicts, so both look clean while checking nothing. §9's KB and hook tests fail | Rewrite them for `defined_by` and `not_defined_by` before use. These sections also say `neuro-symbolic` and `verifier.ts`, while the repo has `neural-symbolic` and `verify.ts` |
 
 ## 0. What "2b" means here, honestly
 
 Sheth et al. split *lifting* (category 2, "neural patterns lifted into symbolic knowledge") into **2a decoupled** and **2b intertwined**. In 2b, the symbolic and neural parts shape each other during learning, rather than one checking the other afterwards. This project gets there in two pieces:
 
-| Direction | Mechanism | File | What crosses the boundary |
-|---|---|---|---|
-| symbols → network (training) | **M5 semantic loss** | `semantic-loss.ts` | gradient $\partial\mathcal{L}_{sem}/\partial z$ pushes probability mass off KB-banned tokens |
-| network → symbols (lifting) | **lift step** | `lift.ts` | high-probability next tokens become candidate triples, which are checked against the KB and, if consistent, added |
-| symbols → network (inference) | M1 mask / M2 bias + M3 trace | `constraints.ts` | the logits are edited and the edit is recorded |
-| network output → symbols | M4 verifier | `verifier.ts` | generated text is turned into triples and checked |
+| Direction                      | Mechanism               | File                 | What crosses the boundary                                                                                         |
+| ------------------------------ | ----------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| symbols → network (training)  | **Semantic Loss** | `semantic-loss.ts` | gradient $\partial\mathcal{L}_{sem}/\partial z$ pushes probability mass off KB-banned tokens                    |
+| network → symbols (lifting)   | **lift step**     | `lift.ts`          | high-probability next tokens become candidate triples, which are checked against the KB and, if consistent, added |
+| symbols → network (inference) | Hard Logit Mask         | `constraints.ts`   | the logits are edited and the edit is recorded                                                                    |
+| network output → symbols      | Verifier                | `verifier.ts`      | generated text is turned into triples and checked                                                                 |
 
 The loop **train with $\mathcal{L}_{sem}$ (KB$_r$) → lift → accept → KB$_{r+1}$ → retrain** is the intertwined part. It is still **not** end-to-end differentiable reasoning:
+
 - The KB is discrete.
 - The acceptance gate is a threshold, not a learned function.
 - The reasoner (forward chaining) has no parameters.
 
 State it as "towards 2b", as chapter 04 §2 already does.
 
-```text
-                ┌──────────── KB_r (triples + Horn rules) ─────────────┐
-                │                                                      │
-     allowed sets A_t                                       accept consistent
-                │                                            candidates (lift)
-                ▼                                                      
-  corpus ─► forward ─► L_CE + λ_s·L_sem ─► backward ─► weights_r ─► probe "the x …"
-                                                         │
-                                         generate ─► M1/M2 + M3 trace ─► text ─► M4 verifier
-```
+![Knowledge Base gives one allowed set, used by the semantic loss in training and by the hard mask at decoding; massBefore marks where the trained model meets the mask](../../docs/images/fig-design-pipeline.png)
 
 ## 1. File layout
 
@@ -59,6 +52,7 @@ tests/neuro-symbolic.test.ts                                        (§9)
 ```
 
 Changes to existing files, all opt-in so that today's behaviour is unchanged (prediction P2):
+
 - `transformer.ts`: an optional `sem` argument to `backward` (§4), and an optional `hooks` argument to `generateText` (§5).
 - `train.ts` and `train-worker.ts`: precompute the masks and pass `lambdaS` (§4).
 - `train-transformer-request.ts`: `lambdaS`, default `0`.
@@ -66,10 +60,10 @@ Changes to existing files, all opt-in so that today's behaviour is unchanged (pr
 
 ## 2. `symbolic.ts`: knowledge base, reasoner, allowed set
 
-This KB was written for the earlier story corpus (see mismatch 1 above), where it used only words that occurred in `STORIES`. A grep of that corpus found `eagle flies` ×2, `eagle flew` ×2, `bird flew`, `fish swims` ×2, `fish swim` ×2, `fish swam` and **`girl flew` ×1**. That last one is a story where a girl rides a bird. Under `cannot(human, fly)` it is a **corpus conflict**, and the trainer counts it (§4). The conflict is useful, not a bug: it is exactly the place where the network's data and the symbolic knowledge disagree.
+This KB is written for the civil-law text the transformer trains on: the eight role definitions at `corpus.ts` L23-38. It has 26 base facts and 5 rules, closing to 100 facts with 56 `not_defined_by` bans. It is enforced only inside three definition frames such as `?x is the person who`, because wider triggers ban legitimate text. Probe, from `tests/neural-symbolic-kb.test.ts` and a read-only script on the real tokenizer: it fires at 9 of 5,390 positions (97 of 85,984 window positions) with 0 conflicts and nothing `unenforceable`. These are text and tokenizer checks. They do not show that the mask removes any probability mass at those positions, and the frames cover very little of the corpus. `not_defined_by(landlord,rents)` stays in the KB but is not enforced until it has had legal review. This is educational text, not legal advice.
 
 ```ts
-// src/routes/neuro-symbolic/symbolic.ts
+// src/routes/neural-symbolic/symbolic.ts
 /**
  * Knowledge base: triples + Horn rules, closed by naive forward chaining.
  * Every fact keeps its provenance, so any ban can be explained as a rule chain.
@@ -85,37 +79,69 @@ export type Provenance =
 export const key = (t: Triple) => `${t.rel}(${t.a},${t.b})`;
 const isVar = (s: string) => s.startsWith("?");
 
+/**
+ * Civil-law facts for the role words in corpus.ts (L23-38). Educational, England and Wales,
+ * not legal advice. `not_defined_by(x, v)` says v is not what defines the role word x. It does
+ * not say a person in that role can never do v: a creditor can bring a claim.
+ */
 export const TRIPLES: Triple[] = [
-  { rel: "is_a", a: "eagle", b: "bird" },
-  { rel: "is_a", a: "bird", b: "animal" },
-  { rel: "is_a", a: "fish", b: "animal" },
-  { rel: "is_a", a: "girl", b: "human" },
-  { rel: "is_a", a: "boy", b: "human" },
-  { rel: "is_a", a: "king", b: "human" },
-  { rel: "is_a", a: "queen", b: "human" },
-  { rel: "can", a: "bird", b: "fly" },
-  { rel: "can", a: "fish", b: "swim" },
-  { rel: "cannot", a: "fish", b: "fly" },
-  { rel: "cannot", a: "human", b: "fly" },
-  { rel: "lives_in", a: "bear", b: "forest" },
-  { rel: "lives_in", a: "wolf", b: "forest" },
+  { rel: "defined_by", a: "claimant", b: "brings" },
+  { rel: "defined_by", a: "defendant", b: "answers" },
+  { rel: "defined_by", a: "landlord", b: "owns" },
+  { rel: "defined_by", a: "tenant", b: "rents" },
+  { rel: "defined_by", a: "trader", b: "sells" },
+  { rel: "defined_by", a: "consumer", b: "buys" },
+  { rel: "defined_by", a: "creditor", b: "is_owed" },
+  { rel: "defined_by", a: "debtor", b: "owes" },
+  { rel: "is_a", a: "claimant", b: "court_party" },
+  { rel: "is_a", a: "defendant", b: "court_party" },
+  { rel: "is_a", a: "landlord", b: "housing_party" },
+  { rel: "is_a", a: "tenant", b: "housing_party" },
+  { rel: "is_a", a: "trader", b: "trade_party" },
+  { rel: "is_a", a: "consumer", b: "trade_party" },
+  { rel: "is_a", a: "creditor", b: "debt_party" },
+  { rel: "is_a", a: "debtor", b: "debt_party" },
+  { rel: "counterpart", a: "claimant", b: "defendant" },
+  { rel: "counterpart", a: "landlord", b: "tenant" },
+  { rel: "counterpart", a: "trader", b: "consumer" },
+  { rel: "counterpart", a: "creditor", b: "debtor" },
+  { rel: "disjoint", a: "court_party", b: "housing_party" },
+  { rel: "disjoint", a: "court_party", b: "trade_party" },
+  { rel: "disjoint", a: "court_party", b: "debt_party" },
+  { rel: "disjoint", a: "housing_party", b: "trade_party" },
+  { rel: "disjoint", a: "housing_party", b: "debt_party" },
+  { rel: "disjoint", a: "trade_party", b: "debt_party" },
 ];
 
 export const RULES: Rule[] = [
   {
-    id: "R-TRANS-ISA",
-    if: [{ rel: "is_a", a: "?x", b: "?y" }, { rel: "is_a", a: "?y", b: "?z" }],
-    then: { rel: "is_a", a: "?x", b: "?z" },
+    id: "R-SYM-COUNTERPART",
+    if: [{ rel: "counterpart", a: "?x", b: "?y" }],
+    then: { rel: "counterpart", a: "?y", b: "?x" },
   },
   {
-    id: "R-INHERIT-CAN",
-    if: [{ rel: "is_a", a: "?x", b: "?y" }, { rel: "can", a: "?y", b: "?z" }],
-    then: { rel: "can", a: "?x", b: "?z" },
+    id: "R-SYM-DISJOINT",
+    if: [{ rel: "disjoint", a: "?c", b: "?d" }],
+    then: { rel: "disjoint", a: "?d", b: "?c" },
   },
   {
-    id: "R-INHERIT-CANNOT",
-    if: [{ rel: "is_a", a: "?x", b: "?y" }, { rel: "cannot", a: "?y", b: "?z" }],
-    then: { rel: "cannot", a: "?x", b: "?z" },
+    id: "R-CLASS",
+    if: [{ rel: "is_a", a: "?y", b: "?d" }, { rel: "defined_by", a: "?y", b: "?v" }],
+    then: { rel: "class_verb", a: "?d", b: "?v" },
+  },
+  {
+    id: "R-COUNTER",
+    if: [{ rel: "counterpart", a: "?x", b: "?y" }, { rel: "defined_by", a: "?y", b: "?v" }],
+    then: { rel: "not_defined_by", a: "?x", b: "?v" },
+  },
+  {
+    id: "R-OTHER-DOMAIN",
+    if: [
+      { rel: "is_a", a: "?x", b: "?c" },
+      { rel: "disjoint", a: "?c", b: "?d" },
+      { rel: "class_verb", a: "?d", b: "?v" },
+    ],
+    then: { rel: "not_defined_by", a: "?x", b: "?v" },
   },
 ];
 
@@ -147,7 +173,10 @@ export class KnowledgeBase {
   readonly facts = new Map<string, { t: Triple; prov: Provenance }>();
   private readonly base: { t: Triple; prov: Provenance }[] = [];
 
-  constructor(triples: Triple[], readonly rules: Rule[]) {
+  readonly rules: Rule[];
+
+  constructor(triples: Triple[], rules: Rule[]) {
+    this.rules = rules;
     for (const t of triples) this.assert(t, { source: "kb" });
     this.close();
   }
@@ -205,11 +234,13 @@ export class KnowledgeBase {
     }
   }
 
-  /** can(x,y) and cannot(x,y) both hold. Reported, never silently resolved. */
+  /** defined_by(x,v) and not_defined_by(x,v) both hold. Reported, never silently resolved. */
   contradictions(): { a: string; b: string }[] {
     const out: { a: string; b: string }[] = [];
     for (const { t } of this.facts.values()) {
-      if (t.rel === "can" && this.has("cannot", t.a, t.b)) out.push({ a: t.a, b: t.b });
+      if (t.rel === "defined_by" && this.has("not_defined_by", t.a, t.b)) {
+        out.push({ a: t.a, b: t.b });
+      }
     }
     return out;
   }
@@ -239,28 +270,56 @@ export class KnowledgeBase {
 
 // ─── From facts to token ids ────────────────────────────────────────────────
 
-/** Surface forms of an action word, so a ban on fly also bans flies and flew. */
+/**
+ * Token text of each KB verb. `is_owed` maps to "owed", not "is": banning " is" would also block
+ * "the debtor is the person who is liable". Its triggers below read one word further instead.
+ */
 export const SURFACE: Record<string, string[]> = {
-  fly: ["fly", "flies", "flew", "flying"],
-  swim: ["swim", "swims", "swam", "swimming"],
+  brings: ["brings"],
+  answers: ["answers"],
+  owns: ["owns"],
+  rents: ["rents"],
+  sells: ["sells"],
+  buys: ["buys"],
+  is_owed: ["owed"],
+  owes: ["owes"],
 };
 
 export const baseForm = (word: string): string | undefined =>
   Object.keys(SURFACE).find((k) => SURFACE[k].includes(word));
 
 /**
- * A trigger says: when the last context words match `pattern` (?x binds to a KB
- * entity), the next word is banned (rel cannot) or supported (other rels).
+ * A trigger says: when the last context words match `pattern` (?x binds to a KB entity), the next
+ * word is banned or supported. `only` and `except` limit which KB verbs the trigger may enforce.
  */
-export type Trigger = { id: string; pattern: string[]; rel: string; mode: "ban" | "support" };
+export type Trigger = {
+  id: string;
+  pattern: string[];
+  rel: string;
+  mode: "ban" | "support";
+  only?: string[];
+  except?: string[];
+};
 
-export const TRIGGERS: Trigger[] = [
-  { id: "T-SUBJ-VERB", pattern: ["?x"], rel: "cannot", mode: "ban" },
-  { id: "T-CAN", pattern: ["?x", "can"], rel: "cannot", mode: "ban" },
-  { id: "T-COULD", pattern: ["?x", "could"], rel: "cannot", mode: "ban" },
-  { id: "T-SUBJ-VERB+", pattern: ["?x"], rel: "can", mode: "support" },
-  { id: "T-LIVES", pattern: ["?x", "lives", "in", "the"], rel: "lives_in", mode: "support" },
+/** Definition frames only. One-word triggers such as "the landlord" would be legally unsound. */
+const FRAMES = [
+  ["?x", "is", "the", "person", "who"],
+  ["?x", "is", "a", "person", "who"],
+  ["?x", "is", "a", "business", "that"],
 ];
+
+export const TRIGGERS: Trigger[] = FRAMES.flatMap((frame, i) => [
+  { id: `T-F${i}-BAN`, pattern: frame, rel: "not_defined_by", mode: "ban" as const, except: ["is_owed"] },
+  { id: `T-F${i}-SUP`, pattern: frame, rel: "defined_by", mode: "support" as const, except: ["is_owed"] },
+  { id: `T-F${i}-IS-BAN`, pattern: [...frame, "is"], rel: "not_defined_by", mode: "ban" as const, only: ["is_owed"] },
+  { id: `T-F${i}-IS-SUP`, pattern: [...frame, "is"], rel: "defined_by", mode: "support" as const, only: ["is_owed"] },
+]);
+
+/**
+ * Derived but not enforced until legally reviewed: a subtenant's landlord also rents, and bare
+ * "rents" runs both ways in English. The fact and its proof stay in the KB.
+ */
+export const NOT_ENFORCED = new Set(["not_defined_by(landlord,rents)"]);
 
 /**
  * word → ids of tokens that are exactly " word" (a whole word starting with a space).
@@ -319,7 +378,10 @@ export function allowed(
     if (!ok || !x) continue;
 
     for (const obj of kb.objects(trig.rel, x)) {
-      const forms = trig.rel === "lives_in" ? [obj] : (SURFACE[obj] ?? [obj]);
+      if (trig.only && !trig.only.includes(obj)) continue;
+      if (trig.except?.includes(obj)) continue;
+      if (trig.mode === "ban" && NOT_ENFORCED.has(key({ rel: trig.rel, a: x, b: obj }))) continue;
+      const forms = SURFACE[obj] ?? [obj];
       const target = trig.mode === "ban" ? banned : supported;
       let hit = false;
       for (const form of forms) {
@@ -497,6 +559,7 @@ parentPort!.postMessage({ type: "done", loss: totalLoss, semLoss: totalSem });
 ```
 
 Two further edits:
+
 - **Schema:** add `lambdaS: z.number().min(0).max(5).default(0)` to `train-transformer-request.ts`.
 - **Weights filename:** add the suffix `-sem${lambdaS}` when `lambdaS > 0`. Otherwise a cached unconstrained model is loaded for a constrained run, and the comparison is void.
 
@@ -630,11 +693,11 @@ That proof is the explanation the symbolic layer gives for the result.
 
 This is the "neural patterns lifted into symbolic knowledge" half. Probe the trained network with templates. Read its next-word distribution and turn confident verb predictions into **candidate** triples. Each candidate falls into one of three cases:
 
-| Status | Meaning | Action |
-|---|---|---|
-| `confirmed` | KB already holds it | none; evidence the network learned the fact |
-| `conflict` | KB derives the opposite (`cannot`) | report with probability and proof; direct evidence of the reasoning gap (chapter 03) |
-| `novel` | neither | accept only if $p\ge\tau$ **and** adding it creates no new contradiction |
+| Status        | Meaning                              | Action                                                                               |
+| ------------- | ------------------------------------ | ------------------------------------------------------------------------------------ |
+| `confirmed` | KB already holds it                  | none; evidence the network learned the fact                                          |
+| `conflict`  | KB derives the opposite (`cannot`) | report with probability and proof; direct evidence of the reasoning gap (chapter 03) |
+| `novel`     | neither                              | accept only if $p\ge\tau$ **and** adding it creates no new contradiction     |
 
 ```ts
 // src/routes/neuro-symbolic/lift.ts
@@ -711,12 +774,12 @@ export function acceptLifted(kb: KnowledgeBase, cands: Candidate[], tau = 0.3) {
 
 **The intertwined loop:**
 
-| Round | Step | Result |
-|---|---|---|
-| 0 | Train with $\lambda_s>0$ against KB$_0$ | weights$_0$ |
-| 0 | `liftCan` → `acceptLifted` | KB$_1$ |
-| 1 | Retrain (or fine-tune) with $\lambda_s$ against KB$_1$ | weights$_1$ |
-| … | Stop when a round accepts nothing | |
+| Round | Step                                                       | Result        |
+| ----- | ---------------------------------------------------------- | ------------- |
+| 0     | Train with $\lambda_s>0$ against KB$_0$                | weights$_0$ |
+| 0     | `liftCan` → `acceptLifted`                            | KB$_1$      |
+| 1     | Retrain (or fine-tune) with $\lambda_s$ against KB$_1$ | weights$_1$ |
+| …    | Stop when a round accepts nothing                          |               |
 
 Every lifted fact carries `[lifted, p=…]` in its proof, so an explanation always shows which knowledge came from the network and which came from the author. Keep $\tau$ high, and log every rejection. Lifted facts are the network's beliefs, not ground truth; the corpus has talking animals.
 
@@ -835,11 +898,11 @@ curl -s -X POST localhost:5173/neuro-symbolic -H 'content-type: application/json
 
 These are gate 1 of chapter 05 §3 for the new term, plus P1 and P2 of chapter 04 §9. The numbers in the table were checked by hand: $z=[0,0,0]$, $A=\{0,1\}$ gives $\mathcal{L}=-\ln\tfrac23=0.4055$ and gradient $[\tfrac13-\tfrac12,\ \tfrac13-\tfrac12,\ \tfrac13]$.
 
-| logits z | A (banned B) | L_sem | dL/dz |
-|---|---|---|---|
+| logits z  | A (banned B)   | L_sem  | dL/dz                        |
+| --------- | -------------- | ------ | ---------------------------- |
 | [0, 0, 0] | {0, 1} (B={2}) | 0.4055 | [−0.1667, −0.1667, 0.3333] |
-| [2, 0, 0] | {1, 2} (B={0}) | 1.546 | [0.787, −0.3935, −0.3935] |
-| any | all (B=∅) | 0 | [0, 0, 0] |
+| [2, 0, 0] | {1, 2} (B={0}) | 1.546  | [0.787, −0.3935, −0.3935]  |
+| any       | all (B=∅)     | 0      | [0, 0, 0]                    |
 
 ```ts
 // tests/neuro-symbolic.test.ts
@@ -931,16 +994,17 @@ The P2 test as written only checks determinism. The full P2 check compares outpu
 
 ## 10. What to report
 
-| Measure | Where it comes from | What it says |
-|---|---|---|
-| `corpusConflicts` | §4 | how often the training text itself breaks the KB |
-| `semLoss` over epochs, for $\lambda_s\in\{0, 0.5, 2\}$ | §4 | whether the network learns to put mass on $A_t$ without the mask |
-| `massBefore` at triggered steps, with the mask **off** at inference | §5 | **the key number for 2b**: if training with $\lambda_s>0$ lowers it, the knowledge has moved into the weights |
-| verifier violation rate, mask off vs on | §6 | P1 and P3 |
-| lifted candidates by status | §7 | what the network believes, and where it disagrees with the KB |
-| held-out CE | E2 | the cost of the constraint |
+| Measure                                                                     | Where it comes from | What it says                                                                                                          |
+| --------------------------------------------------------------------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `corpusConflicts`                                                         | §4                 | how often the training text itself breaks the KB                                                                      |
+| `semLoss` over epochs, for $\lambda_s\in\{0, 0.5, 2\}$                  | §4                 | whether the network learns to put mass on $A_t$ without the mask                                                    |
+| `massBefore` at triggered steps, with the mask **off** at inference | §5                 | **the key number for 2b**: if training with $\lambda_s>0$ lowers it, the knowledge has moved into the weights |
+| verifier violation rate, mask off vs on                                     | §6                 | P1 and P3                                                                                                             |
+| lifted candidates by status                                                 | §7                 | what the network believes, and where it disagrees with the KB                                                         |
+| held-out CE                                                                 | E2                  | the cost of the constraint                                                                                            |
 
 Limits, in addition to chapter 04 §8:
+
 - **Whole-word tokens only.** A word that BPE splits is reported as `unenforceable` and never partly banned.
 - **Lifting reads probabilities, not mechanisms.** A lifted triple says what the network predicts, not why.
 - **Lexical subject matching.** The KB binds `?x` to the last word, so "the eagle saw the girl flew" would wrongly bind "girl". With a 16-token window this is rare, but it can happen.
