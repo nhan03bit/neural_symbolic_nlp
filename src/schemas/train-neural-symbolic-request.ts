@@ -4,6 +4,6 @@ import TrainTransformerRequest from "./train-transformer-request.js";
 
 export default TrainTransformerRequest.extend({
   // 0 trains on cross-entropy alone, which is the control arm for seeds other than 42.
-  lambdaS: z.number().min(0).max(5).default(2),
+  lambdaS: z.number().min(0).max(50).default(2),
   seed: z.number().int().default(42),
 });

@@ -13,7 +13,7 @@ import type { EpochResult, InitResult, TransformerTrainResult } from "../train-t
 import type { TransformerConfig } from "../train-transformer/transformer.js";
 import type { SemMask } from "./semantic-loss.js";
 import { createHash } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { cpus } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
@@ -94,7 +94,10 @@ export type TriggerPattern = {
 };
 
 export type NeuralSymbolicInit = InitResult & NeuralSymbolicMeta & {
+  epochs: number;
   triggers: TriggerPattern[];
+  /** The same model without the rule, so a rise in semantic loss can be read against it. */
+  control: { semLoss: number[] } | null;
 };
 
 /** What each trigger pattern did at one epoch, in the same order as `init.triggers`. */
@@ -233,6 +236,17 @@ export function buildSemMasks(
   return { semMasks, semGroups, ruleTokens, triggers, constrainedPositions, totalPositions, corpusConflicts };
 }
 
+/** The saved λ = 0 run for these settings, or null if this run is that one or none has been saved. */
+async function readControl(path: string, lambdaS: number): Promise<NeuralSymbolicInit["control"]> {
+  if (lambdaS === 0) return null;
+  try {
+    const { history } = JSON.parse(await readFile(path, "utf-8")) as { history: { semLoss: number }[] };
+    return { semLoss: history.map((entry) => entry.semLoss) };
+  } catch {
+    return null;
+  }
+}
+
 function buildWorkerBundle(): string {
   // From the project root, for the same reason as the baseline: once bundled, this module has no
   // .ts source beside it.
@@ -299,6 +313,7 @@ export async function* trainNeuralSymbolic(
   const weightsPath = join(dataDir, weightsFile);
   const checkpointPath = (epoch: number) => join(dataDir, weightsFile.replace(/\.json$/, `-at${epoch}.json`));
   const baselineFile = baselineWeightsFilename(epochs, cfg);
+  const control = await readControl(join(dataDir, neuralSymbolicWeightsFilename(epochs, cfg, 0, seed)), lambdaS);
 
   const initEvent = (totalParams: number): NeuralSymbolicInit => ({
     vocabSize,
@@ -313,7 +328,9 @@ export async function* trainNeuralSymbolic(
     corpusSentences: TRAIN_TEXTS.length,
     trainingSequences: sequences.length,
     ...meta,
+    epochs,
     triggers,
+    control,
   });
 
   const measure = (w: ReturnType<typeof initWeights>) => {

@@ -2,7 +2,7 @@
  * One measure over all epochs, redrawn as each epoch arrives. Each measure gets its own chart,
  * because cross-entropy and semantic loss differ by about a million times and would need two axes
  * on one. The y axis runs from the series' lowest to highest value and is labelled with both, so
- * shape reads as change, not size.
+ * shape reads as change, not size. A reference run shares that axis, so the two can be compared.
  */
 import styles from "./styles.module.css";
 
@@ -14,19 +14,23 @@ type Props = {
   active: number;
   lastEpoch: number;
   onHover: (index: number | null) => void;
+  reference?: number[];
+  referenceLabel?: string;
 };
 
 const WIDTH = 1000;
 const HEIGHT = 100;
 
-export function LossChart({ title, values, format, active, lastEpoch, onHover }: Props) {
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+export function LossChart({ title, values, format, active, lastEpoch, onHover, reference, referenceLabel }: Props) {
+  // Cut to the epochs drawn so far, so during a live run both lines share one x axis.
+  const compared = reference?.slice(0, values.length);
+  const min = Math.min(...values, ...(compared ?? []));
+  const max = Math.max(...values, ...(compared ?? []));
   const span = max - min || 1;
   const last = Math.max(1, values.length - 1);
   const x = (i: number) => (i / last) * 100;
   const y = (v: number) => (1 - (v - min) / span) * 100;
-  const path = values
+  const pathOf = (series: number[]) => series
     .map((v, i) => `${i === 0 ? "M" : "L"}${((i / last) * WIDTH).toFixed(1)} ${((y(v) / 100) * HEIGHT).toFixed(1)}`)
     .join("");
 
@@ -52,7 +56,8 @@ export function LossChart({ title, values, format, active, lastEpoch, onHover }:
         onPointerLeave={() => onHover(null)}
       >
         <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} preserveAspectRatio="none" role="img" aria-label={`${title} by epoch, from ${format(values[0])} to ${format(values.at(-1)!)}`}>
-          <path d={path} class={styles.line} />
+          {compared && <path d={pathOf(compared)} class={styles.referenceLine} />}
+          <path d={pathOf(values)} class={styles.line} />
         </svg>
         {/* HTML rather than SVG: the stretched plot would turn a circle into an oval. */}
         <div class={styles.crosshair} style={{ left: `${x(active)}%` }} />
@@ -62,6 +67,12 @@ export function LossChart({ title, values, format, active, lastEpoch, onHover }:
         <span>epoch 0</span>
         <span>epoch {lastEpoch}</span>
       </div>
+      {compared && compared[active] !== undefined && (
+        <div class={styles.chartLegend}>
+          <span><i class={styles.legendLine} /> this run {format(values[active])}</span>
+          <span><i class={styles.legendReference} /> {referenceLabel} {format(compared[active])}</span>
+        </div>
+      )}
     </figure>
   );
 }

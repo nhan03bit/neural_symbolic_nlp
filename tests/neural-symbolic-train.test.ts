@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { StepTrace } from "../src/routes/neural-symbolic/constraints.js";
 import type { NeuralSymbolicEpoch, NeuralSymbolicInit, NeuralSymbolicOpts } from "../src/routes/neural-symbolic/train.js";
+import TrainNeuralSymbolicRequest from "../src/schemas/train-neural-symbolic-request.js";
 import { makeProcessor } from "../src/routes/neural-symbolic/constraints.js";
 import routes from "../src/routes/neural-symbolic/index.js";
 import { classifyCandidate, makeLifter } from "../src/routes/neural-symbolic/lift.js";
@@ -195,6 +196,25 @@ describe("per-epoch report", () => {
       expect(Array.isArray(epoch.violated)).toBe(true);
     }
   }, TIMEOUT);
+
+  test("a run reads its control from the saved λ = 0 run, if there is one", async () => {
+    const control = await runNeuralSymbolic(0);
+    expect(control.init.control).toBeNull();
+
+    const { init } = await runNeuralSymbolic(1);
+    const saved = read(control.file).history as NeuralSymbolicEpoch[];
+    expect(init.control?.semLoss).toEqual(saved.map((e) => e.semLoss));
+    expect(init.control?.semLoss).toHaveLength(EPOCHS + 1);
+
+    const noControl = await runNeuralSymbolic(1, 7);
+    expect(noControl.init.control).toBeNull();
+  }, TIMEOUT);
+
+  test("λ can go up to 50, the strongest setting tested", () => {
+    const body = { epochs: 50, temperature: 0.8, topP: 0.9, numLayers: 2, maxTokens: 20 };
+    expect(TrainNeuralSymbolicRequest.safeParse({ ...body, lambdaS: 50 }).success).toBe(true);
+    expect(TrainNeuralSymbolicRequest.safeParse({ ...body, lambdaS: 51 }).success).toBe(false);
+  });
 
   test("a rule is violated from a mean p of exactly 0.02, not below it", () => {
     const rule = (word: string, r: string) => ({ rule: r, fact: `not_defined_by(claimant, ${word})`, word, mode: "ban" as const });

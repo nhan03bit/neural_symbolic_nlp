@@ -178,6 +178,8 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: var(--space-3);
+  /* Only one chart has a legend, and stretching the other would push its plot out of line. */
+  align-items: start;
 }
 
 .chart {
@@ -238,6 +240,36 @@
   stroke-linejoin: round;
   stroke-linecap: round;
   vector-effect: non-scaling-stroke;
+}
+
+.referenceLine {
+  fill: none;
+  stroke: var(--muted-foreground);
+  stroke-width: 2px;
+  stroke-dasharray: 6 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.chartLegend {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-8);
+  color: var(--muted-foreground);
+}
+
+.legendLine,
+.legendReference {
+  display: inline-block;
+  width: 1.5em;
+  vertical-align: middle;
+  border-top: 2px solid var(--primary);
+}
+
+.legendReference {
+  border-top: 2px dashed var(--muted-foreground);
 }
 
 .crosshair {

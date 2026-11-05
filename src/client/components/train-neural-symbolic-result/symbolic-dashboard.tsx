@@ -84,8 +84,21 @@ export function SymbolicDashboard({ init, epochs }: Props) {
       <div class={styles.label}>Loss by epoch</div>
       <div class={styles.charts}>
         <LossChart title="Cross-entropy loss" values={epochs.map((e) => e.loss)} format={formatCe} {...chart} />
-        <LossChart title="Semantic loss" values={epochs.map((e) => e.semLoss)} format={formatSem} {...chart} />
+        <LossChart
+          title="Semantic loss"
+          values={epochs.map((e) => e.semLoss)}
+          format={formatSem}
+          reference={init.control?.semLoss}
+          referenceLabel="no rule (λ = 0)"
+          {...chart}
+        />
       </div>
+      {init.lambdaS > 0 && !init.control && (
+        <div class={styles.muted}>
+          No λ = 0 run is saved for these settings, so semantic loss has no control to compare with. Train one
+          with: {`${init.epochs} ${init.temperature} ${init.topP} ${init.numLayers} 40 0 ${init.seed}`}
+        </div>
+      )}
     </div>
   );
 }
