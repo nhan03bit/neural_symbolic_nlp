@@ -836,7 +836,7 @@ flowchart LR
   A["ids = seedIds"] --> B["context = last seqLen ids"]
   B --> C["forward(context)"]
   C --> D["copy logits of last position<br/>into fresh Float32Array[V]"]
-  D -. "seam for M1/M2<br/>LogitsProcessor (ch. 04)" .-> D2["«designed»<br/>mask / bias + trace"]
+  D -. "seam for M1/M2<br/>LogitsProcessor (ch. 04)" .-> D2["neural-symbolic compare route<br/>mask / bias + trace"]
   D --> E["÷ temperature"]
   D2 -.-> E
   E --> F["stable softmax"]
@@ -849,7 +849,7 @@ flowchart LR
 
 There is no KV cache: each step runs the full forward pass on the window again. The cost per token is O(S²·D·N), which is acceptable at S ≤ 16 and D = 32. Sampling draws from `matrix.rand`, so `resetRand(seed)` makes generation reproducible. Prediction P2 of chapter 04 depends on this.
 
-## 7. Stage 5 — the symbolic layer («designed», not implemented)
+## 7. Stage 5 — the symbolic layer (implemented in `routes/neural-symbolic/`; the diagrams show the original design)
 
 *Progress: [ch. 04](progress/04-neurosymbolic-design.md). Planned files: `symbolic.ts`, `constraints.ts`, verifier.*
 
@@ -1039,7 +1039,7 @@ Housekeeping, lower priority:
 | Discriminated union + type guard | `SavedNetwork`, yielded event unions, `isTrainResult` | Polymorphism with no class hierarchy, checked by the compiler |
 | Single source of truth | `BLOCK_KEYS` + mapped types | Weights, grads, Adam state, layout and serialisation all follow one list of keys |
 | Seeded dependency | `mulberry32(seed)`, `resetRand` | Reproducibility; seed variation is an experimental variable (E1) |
-| Strategy («designed») | `LogitsProcessor` in `generateText` | Symbolic constraints plug in without touching the network |
+| Strategy | `LogitsProcessor` in `generateText` | Symbolic constraints plug in without touching the network |
 
 ## 11. Traceability: progress chapter → code
 
@@ -1050,5 +1050,5 @@ Housekeeping, lower priority:
 | 2 XOR | [01 §3](progress/01-background.md#3-stage-2-learning-by-backpropagation) | `routes/neural-net/*`, `server/lib/rng.ts` | `XorTrainer`, `SavedNetwork` | Works, measured |
 | 3 Skip-gram | [01 §4](progress/01-background.md#4-stage-3-word-embeddings-and-the-collapse-we-fixed) | `routes/train-embed/*`, `server/lib/math.ts` | `SkipGramTrainer`, `Corpus`, `Vocab` | Fixed, measured |
 | 4 Transformer | [02](progress/02-transformer-self-attention.md) | `routes/train-transformer/*` | `TransformerModule`, `TransformerWeights`, `ForwardCache`, `WeightLayoutModule`, `TrainWorker` | Implemented, type-checks; D1–D3 open; gates of ch. 05 not passed |
-| 5 Symbolic | [04](progress/04-neurosymbolic-design.md) | — | `KnowledgeBase`, `LogitsProcessor`, `Verifier`, `StepTrace` | Designed only |
+| 5 Symbolic | [04](progress/04-neurosymbolic-design.md) | `routes/neural-symbolic/*` | `KnowledgeBase`, `LogitsProcessor`, `Verifier`, `StepTrace` | Implemented as a separate trainer; lifting reported only; E4 not run |
 | 6 E1–E3 | [05](progress/05-implementation-and-evaluation.md) | — | — | Not run |

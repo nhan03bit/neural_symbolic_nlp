@@ -1,0 +1,294 @@
+.label {
+  font-size: var(--text-8);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted-foreground);
+  font-weight: var(--font-semibold);
+  margin-top: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.chip {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  font-size: var(--text-8);
+}
+
+.chip b {
+  font-family: var(--font-mono);
+}
+
+.controls {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.prompt {
+  flex: 1;
+  min-width: 0;
+}
+
+.muted {
+  font-size: var(--text-8);
+  color: var(--muted-foreground);
+}
+
+.warning {
+  font-size: var(--text-8);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-large);
+  color: var(--warning);
+  margin-top: var(--space-1);
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.column {
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+}
+
+.columnTitle {
+  font-weight: var(--font-bold);
+}
+
+.file {
+  font-family: var(--font-mono);
+  font-size: var(--text-8);
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+
+.text {
+  font-family: var(--font-mono);
+  font-size: var(--text-7);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.trace {
+  font-family: var(--font-mono);
+  font-size: var(--text-8);
+  overflow-wrap: anywhere;
+}
+
+.table {
+  width: 100%;
+  font-size: var(--text-8);
+  font-variant-numeric: tabular-nums;
+}
+
+.total td {
+  font-weight: var(--font-bold);
+}
+
+.table th,
+.table td {
+  vertical-align: top;
+  text-align: left;
+}
+
+.confirmed {
+  color: var(--success);
+  font-weight: var(--font-bold);
+}
+
+.conflict {
+  color: var(--danger);
+  font-weight: var(--font-bold);
+}
+
+.novel {
+  color: var(--muted-foreground);
+  font-weight: var(--font-bold);
+}
+
+/* Reversed with a single child, so the box opens at its newest card and stays there as cards arrive. */
+.epochsBox {
+  display: flex;
+  flex-direction: column-reverse;
+  max-height: 22rem;
+  overflow-y: auto;
+}
+
+.epochs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* A long run makes thousands of cards, so the browser only lays out those near the screen. */
+.card {
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-large);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
+}
+
+.cardEpoch {
+  font-size: var(--text-8);
+  color: var(--muted-foreground);
+  margin-bottom: var(--space-1);
+}
+
+.cardSample {
+  font-family: var(--font-mono);
+  font-size: var(--text-7);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-bottom: var(--space-2);
+}
+
+.cardLine {
+  display: grid;
+  grid-template-columns: 7.5em minmax(0, 1fr);
+  gap: var(--space-2);
+  font-size: var(--text-8);
+  overflow-wrap: anywhere;
+}
+
+.cardKey {
+  color: var(--muted-foreground);
+}
+
+.cardValue {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-3);
+}
+
+.chart {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto 96px auto;
+  column-gap: var(--space-2);
+  row-gap: var(--space-1);
+  margin: 0;
+  min-width: 0;
+}
+
+.chartHead {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--text-8);
+}
+
+.chartAxis {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: var(--text-8);
+  color: var(--muted-foreground);
+}
+
+.chartEpochs {
+  grid-column: 2;
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--text-8);
+  color: var(--muted-foreground);
+}
+
+.plot {
+  position: relative;
+  min-width: 0;
+  border-bottom: 1px solid var(--border);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.plot svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.line {
+  fill: none;
+  stroke: var(--primary);
+  stroke-width: 2px;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.crosshair {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--muted-foreground);
+  pointer-events: none;
+}
+
+.marker {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 0 2px var(--background);
+  pointer-events: none;
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+}
+
+.statValue {
+  font-family: var(--font-mono);
+  font-weight: var(--font-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+.tableScroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.compact th,
+.compact td {
+  padding: var(--space-1) var(--space-2);
+}
+
+.table .number {
+  text-align: right;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.pattern {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}

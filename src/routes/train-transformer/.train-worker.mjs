@@ -407,7 +407,7 @@ function crossEntropyLoss(probs, targets, seqLen2, V) {
   }
   return loss / seqLen2;
 }
-function backward(cache, targets, w2, cfg2, grads2) {
+function backward(cache, targets, w2, cfg2, grads2, editDLogits) {
   const { vocabSize: V, embDim: D } = cfg2;
   const S = cache.tokenIds.length;
   const dLogits = new Float32Array(S * V);
@@ -417,6 +417,7 @@ function backward(cache, targets, w2, cfg2, grads2) {
     }
     dLogits[i * V + targets[i]] -= 1 / S;
   }
+  editDLogits?.(dLogits, cache.probs, S, V);
   addInPlace(grads2.headB, sumCols(dLogits, S, V));
   addInPlace(grads2.headW, matmulTransA(cache.lnFOut, dLogits, S, D, V));
   let dX = matmulTransB(dLogits, w2.headW, S, V, D);

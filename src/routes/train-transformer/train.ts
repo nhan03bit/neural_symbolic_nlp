@@ -41,6 +41,10 @@ import { CIVIL_LAW_DEFINITIONS, STORIES } from "../train-embed/corpus";
  */
 export const MODEL_VERSION = "v4";
 
+// A word keeps its apostrophe ending, so "ravi's" is one token. A separate "s" would be dropped
+// without the optional whitespace, and with it could fuse onto any sampled word ("thes").
+export const PRE_TOKEN_RE = /\s?\w+(?:'\w+)*|[^\w\s]/g;
+
 /** Training text: each civil-law definition as a sentence, then the dispute stories that use those terms. */
 export const TRAIN_TEXTS = [
   ...CIVIL_LAW_DEFINITIONS.map((d) => `${d}.`),
@@ -72,7 +76,7 @@ const round = (arr: Float32Array) =>
   Array.from(arr, (v) => Math.round(v * 1000000) / 1000000);
 
 /** Serialize the full model (weights + config + vocab + BPE merges) to a JSON-cacheable object. */
-function serializeModel(
+export function serializeModel(
   w: TransformerWeights,
   cfg: TransformerConfig,
   vocab: string[],
@@ -105,9 +109,13 @@ function serializeModel(
  * Try to load pre-trained weights and their training log from a cached JSON file.
  * Returns null if the file is missing, or predates saved history (so it gets retrained).
  */
-async function tryLoadWeights(
-  path: string,
-): Promise<{ weights: TransformerWeights; history: EpochResult[] } | null> {
+export async function tryLoadWeights(path: string): Promise<{
+  weights: TransformerWeights;
+  history: EpochResult[];
+  config: TransformerConfig;
+  vocab: string[];
+  merges: { pair: [string, string]; merged: string }[];
+} | null> {
   try {
     const json = JSON.parse(await readFile(path, "utf-8"));
     if (!Array.isArray(json.history)) return null;
@@ -127,7 +135,13 @@ async function tryLoadWeights(
       headW: new Float32Array(sw.headW),
       headB: new Float32Array(sw.headB),
     };
-    return { weights, history: json.history };
+    return {
+      weights,
+      history: json.history,
+      config: json.config,
+      vocab: json.vocab,
+      merges: json.merges,
+    };
   } catch {
     return null;
   }
@@ -190,6 +204,16 @@ type TrainOpts = {
   signal?: AbortSignal;
 };
 
+/** Fingerprint of the training text, so weights are never reloaded for a different corpus. */
+export function corpusHash(): string {
+  return createHash("sha256").update(TRAIN_TEXTS.join("\n")).digest("hex").slice(0, 8);
+}
+
+/** Name of the file holding a finished baseline run with these settings. */
+export function baselineWeightsFilename(epochs: number, cfg: TransformerConfig): string {
+  return `transformer-weights-e${epochs}-l${cfg.numLayers}-d${cfg.embDim}-h${cfg.numHeads}-ff${cfg.ffDim}-ctx${cfg.contextLen}-c${corpusHash()}-${MODEL_VERSION}.json`;
+}
+
 /** Bundle the train-worker.ts entry point with esbuild so it can be loaded as a Worker thread. */
 function buildWorkerBundle(): string {
   // Resolve from the project root, not import.meta.url: in production this
@@ -218,9 +242,6 @@ function buildWorkerBundle(): string {
  * exactly the token ids the route would train on.
  */
 export function buildVocabulary(numMerges = 2000) {
-  // A word keeps its apostrophe ending, so "ravi's" is one token. A separate "s" would be dropped
-  // without the optional whitespace, and with it could fuse onto any sampled word ("thes").
-  const PRE_TOKEN_RE = /\s?\w+(?:'\w+)*|[^\w\s]/g;
   const corpusText = TRAIN_TEXTS.map((s) => ` ${s}`)
     .join("")
     .toLowerCase();
@@ -303,11 +324,7 @@ export async function* trainTransformer(
 
   // The corpus fingerprint keeps weights trained on one training text from being reloaded
   // for another (the vocabulary and token ids would no longer match).
-  const corpusHash = createHash("sha256")
-    .update(TRAIN_TEXTS.join("\n"))
-    .digest("hex")
-    .slice(0, 8);
-  const weightsFilename = `transformer-weights-e${epochs}-l${numLayers}-d${cfg.embDim}-h${cfg.numHeads}-ff${cfg.ffDim}-ctx${cfg.contextLen}-c${corpusHash}-${MODEL_VERSION}.json`;
+  const weightsFilename = baselineWeightsFilename(epochs, cfg);
   const weightsPath = join(process.cwd(), ".data", weightsFilename);
 
   const checkpointPath = (epoch: number) =>

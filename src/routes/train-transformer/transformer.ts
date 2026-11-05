@@ -16,6 +16,10 @@
  *
  * Every weight is a flat Float32Array. Every gradient is computed analytically.
  */
+import type {
+  LogitsProcessor,
+  StepTrace,
+} from "../neural-symbolic/constraints.js";
 import {
   addBias,
   addInPlace,
@@ -810,6 +814,8 @@ export function backward(
   w: TransformerWeights,
   cfg: TransformerConfig,
   grads: TransformerGrads,
+  /** Adds extra loss terms to the logit gradient. The baseline trainer never passes one. */
+  editDLogits?: (dLogits: Float32Array, probs: Float32Array, S: number, V: number) => void,
 ) {
   const { vocabSize: V, embDim: D } = cfg;
   const S = cache.tokenIds.length;
@@ -821,6 +827,8 @@ export function backward(
     }
     dLogits[i * V + targets[i]] -= 1 / S;
   }
+
+  editDLogits?.(dLogits, cache.probs, S, V);
 
   addInPlace(grads.headB, sumCols(dLogits, S, V));
   addInPlace(grads.headW, matmulTransA(cache.lnFOut, dLogits, S, D, V));
@@ -949,6 +957,7 @@ export function generateText(
   temparture = 0.8,
   topP = 0.9,
   seqLen?: number,
+  hooks?: { processor: LogitsProcessor; traces: StepTrace[] },
 ): string {
   const windowSize = seqLen ?? cfg.contextLen;
   const ids = [...seedIds];
@@ -962,6 +971,13 @@ export function generateText(
     for (let v = 0; v < cfg.vocabSize; v++) {
       logits[v] = cache.logits[lastPos * cfg.vocabSize + v];
     }
+
+    const trace = hooks?.processor({
+      ids: contextIds,
+      step,
+      logits,
+      idxToToken,
+    });
 
     for (let v = 0; v < cfg.vocabSize; v++) {
       logits[v] /= temparture;
@@ -1009,6 +1025,10 @@ export function generateText(
       }
     }
 
+    if (trace) {
+      trace.chosen = idxToToken[sampled];
+      hooks?.traces.push(trace);
+    }
     ids.push(sampled);
   }
 

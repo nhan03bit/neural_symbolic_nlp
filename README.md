@@ -251,7 +251,7 @@ The loss stops falling after about 100 epochs and the text is domain words in no
 
 # Neural symbolic integration: semantic loss in training, a hard mask at decoding
 
-A language model trained on next-token cross-entropy has no notion of truth, because the loss only rewards text that looks like the corpus. This project specifies one pipeline for a from-scratch TypeScript transformer, in which the same knowledge base (KB) shapes training through a semantic loss and constrains decoding through a hard logit mask. It measures the baselines that motivate the pipeline and leaves its effect open: the symbolic layer is designed, not implemented, and no experiment on it has been run.
+A language model trained on next-token cross-entropy has no notion of truth, because the loss only rewards text that looks like the corpus. This project specifies one pipeline for a from-scratch TypeScript transformer, in which the same knowledge base (KB) shapes training through a semantic loss and constrains decoding through a hard logit mask. It measures the baselines that motivate the pipeline and leaves its effect open: the symbolic layer is implemented as a separate trainer beside the CE-only baseline, and no full-length experiment on it has been run.
 
 ## The pipeline
 
@@ -267,7 +267,7 @@ The KB covers definitions in the civil-law corpus. For example, `counterpart(cla
 
 The figure traces one unmasked sample from the saved model (seed 1, T = 1, top-p 1.0), which began "the claimant is the person who owns the home", where corpus L23 says "brings a claim". The KB acts on the six tokens before `owns`: the frame `?x is the person who` binds `claimant`, and the closed KB holds `not_defined_by(claimant, owns)` by R-OTHER-DOMAIN, so `owns` is in the banned set. Green marks what the KB reached for this input, not what is correct. The facts are in [`symbolic.ts`](src/routes/neural-symbolic/symbolic.ts), and class labels such as `court_party` are the KB's own, pairwise disjoint as labels and not as people. `defined_by(landlord, owns)` is a corpus simplification.
 
-These are read-only probes, not a measured effect. With the frame alone and the mask off, `owns` has p = 0.1246 (one trained run, T = 1), and 265 of 2,000 sampling seeds drew it at top-p 1.0. At top-p 0.6 all 2,000 drew `brings`, so the error depends on the sampling setting. [A test on the real corpus and tokenizer](tests/neural-symbolic-kb.test.ts) shows the triggers fire at 9 of 5,390 positions and never ban the next token in the corpus. No mask is connected yet, so nothing is removed today, and the KB covers only these definition frames. The layout follows Sheth, Roy and Gaur (2023, Fig. 4), and the drawing is original.
+These are read-only probes, not a measured effect. With the frame alone and the mask off, `owns` has p = 0.1246 (one trained run, T = 1), and 265 of 2,000 sampling seeds drew it at top-p 1.0. At top-p 0.6 all 2,000 drew `brings`, so the error depends on the sampling setting. [A test on the real corpus and tokenizer](tests/neural-symbolic-kb.test.ts) shows the triggers fire at 9 of 5,390 positions and never ban the next token in the corpus. The mask only runs on the neural-symbolic compare route, so the baseline's own output is never edited, and the KB covers only these definition frames. The layout follows Sheth, Roy and Gaur (2023, Fig. 4), and the drawing is original.
 
 ### Method 1 : the Knowledgebase enforced at decoding (Hard logit mask)
 
@@ -295,6 +295,34 @@ The objective is $L = \text{CE} + \lambda_s \cdot (-\log P_A)$, where $P_A$ is t
 - **Perplexity cost.** A hard mask gives infinite perplexity on reference text containing a banned token. Ahmed et al. (2023) report this and score their banning variants on the 50% least toxic validation text only. Here, E2 computes perplexity from the weights alone, without the mask, and E4 reports held-out cross-entropy on targets that do not conflict with the KB.
 
 The stated target stays **zero mass on rule-excluded tokens and a calibrated spread over the rest**, with each guarantee stated next to its coverage.
+
+## Important: extracting transformer neural patterns into symbolic knowledge
+
+This is the "neural patterns lifted into symbolic knowledge" half of the design. It probes the trained network with templates, reads its next-word distribution and turns confident verb predictions into **candidate** triples. Each candidate falls into one of three cases:
+
+| Status      | Meaning                                      | Action                                                                                                             |
+| ----------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `confirmed` | KB already holds it                          | None. Evidence the network learned the fact, though on this model it may be memorisation                           |
+| `conflict`  | KB derives the opposite (`not_defined_by`)   | Report with probability and proof. Direct evidence of the [reasoning gap](docs/progress/03-reasoning-gap.md)       |
+| `novel`     | Neither                                      | Accept only if $p\ge\tau$ **and** adding it creates no new contradiction                                           |
+
+**Reported only.** The neural-symbolic trainer runs [`lift.ts`](src/routes/neural-symbolic/lift.ts) at every epoch and shows each candidate's status, but a `novel` word that passes this gate is only flagged, never added to the KB. No full-length run has been recorded, so the table describes behaviour, not a result. An accepted triple is the network's belief, not ground truth, and it would stay out of the mask and the semantic loss, as the shared failure mode above requires. The design is in [chapter 07 §7](docs/progress/07-neurosymbolic-code-2b.md#7-lifting-liftts-network--symbols).
+
+## Two separate trainers
+
+The baseline and the neural-symbolic model are trained apart, so the difference between them can be inspected directly. They share the corpus, tokeniser, model code, Adam and hyperparameters. Only the loss differs.
+
+|              | Baseline                                                       | Neural-symbolic                                                    |
+| ------------ | -------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Code         | [`train-transformer/train.ts`](src/routes/train-transformer/train.ts) | [`neural-symbolic/train.ts`](src/routes/neural-symbolic/train.ts) |
+| Page         | `/train-transformer`                                           | `/train-neural-symbolic`                                           |
+| Loss         | CE                                                             | CE + $\lambda_s \cdot (-\log P_A)$                                 |
+| Seed         | 42 only                                                        | Chosen per run                                                     |
+| Weight files | `transformer-weights-*`                                        | `neural-symbolic-weights-*`, named with $\lambda_s$, seed and KB hash |
+
+The compare view on the neural-symbolic page runs both models on one prompt and sampling seed, with the mask off and on. It shows their text, the mask trace, the verifier's claim counts and the banned mass at each definition frame. The same page draws the cross-entropy and semantic loss as training runs, with a dashboard of the latest epoch's numbers by trigger pattern. It also gives every epoch one card: the trigger patterns, the rules violated (a blocked word's mean p at its pattern is at least 0.02), each lifted pattern's status, the semantic loss and the banned mass.
+
+[A test](tests/neural-symbolic-train.test.ts) shows that at $\lambda_s = 0$ and seed 42 the new trainer saves the baseline's weights and losses, for a short run (3 epochs, 1 layer, weights compared at their saved 6 decimal places). This makes $\lambda_s = 0$ the CE-only control at seeds the baseline does not offer. Corpus positions are the only ones trained on, so the term still fires at 86 of 85,984 of them. **Implemented, but no full-length run has been compared**, so no effect is claimed.
 
 ## What is measured so far
 
@@ -332,7 +360,7 @@ These samples show that this happens, not how often. On held-out stories, a larg
 
 P1 and P2 follow from the construction, so they test the implementation. P3–P7 are empirical and may fail.
 
-**Experiments, none run.** E1: seed sensitivity. E2: violation rate with the mask off and on. E3: one full trace. E4: the ablation below, at $\lambda_s \in \{0, 2\}$ and seeds 42, 1, 2, 3.
+**Experiments, none run.** E1: seed sensitivity. E2: violation rate with the mask off and on. E3: one full trace. E4: the ablation below, at $\lambda_s \in \{0, 2\}$ and seeds 42, 1, 2, 3. The CE-only arm at seeds 1, 2 and 3 comes from the neural-symbolic trainer at $\lambda_s = 0$.
 
 | Arm                       | `massBefore` | Violations, mask off | Violations a token mask cannot express | Held-out CE, non-conflicting targets |
 | ------------------------- | -------------- | -------------------- | -------------------------------------- | ------------------------------------ |

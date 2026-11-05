@@ -8,6 +8,7 @@ import simpleChat from "./routes/simple-chat";
 import bpeTokenize from "./routes/bpe-tokenize";
 import trainEmbed from "./routes/train-embed";
 import trainTransformer from "./routes/train-transformer";
+import neuralSymbolic from "./routes/neural-symbolic";
 
 const app = new Hono();
 
@@ -66,7 +67,7 @@ app.notFound((c) =>
   ),
 );
 
-export const _routes = app.route("/", simpleChat).route("/", neuralNet).route("/", bpeTokenize).route("/", trainEmbed).route("/", trainTransformer);
+export const _routes = app.route("/", simpleChat).route("/", neuralNet).route("/", bpeTokenize).route("/", trainEmbed).route("/", trainTransformer).route("/", neuralSymbolic);
 
 export type App = typeof _routes;
 export default app;

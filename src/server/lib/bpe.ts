@@ -211,7 +211,7 @@ export function trainBpe(
  */
 export function applyMerges(
   text: string,
-  merges: Merge[],
+  merges: Pick<Merge, "pair" | "merged">[],
   regex: RegExp = PRE_TOKEN_RE,
 ): string[] {
   const preTokens = text.match(regex) || [];

@@ -8,6 +8,7 @@ import { App } from "./components/app/index.js";
 import { useBpeTokenizeChat } from "./hooks/use-bpe-tokenize-chat.js";
 import { useNeuralNetChat } from "./hooks/use-neural-net-chat.js";
 import { useSimpleChat } from "./hooks/use-simple-chat.js";
+import { useTrainNeuralSymbolicChat } from "./hooks/use-train-neural-symbolic-chat.js";
 import { useTrainEmbedChat } from "./hooks/use-train-embed-chat.js";
 import { useTrainTransformerChat } from "./hooks/use-train-transformer-chat.js";
 
@@ -17,6 +18,7 @@ export const routes = defineRoutes(route => [
   route("/neural-net-xor", () => <App chat={useNeuralNetChat()} />),
   route("/train-embed", () => <App chat={useTrainEmbedChat()} />),
   route("/train-transformer", () => <App chat={useTrainTransformerChat()} />),
+  route("/train-neural-symbolic", () => <App chat={useTrainNeuralSymbolicChat()} />),
 ]);
 
 declare module "@w3cj/ruta" {

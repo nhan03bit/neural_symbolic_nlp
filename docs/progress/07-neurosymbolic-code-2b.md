@@ -4,16 +4,16 @@ This chapter gives the code for `src/routes/neuro-symbolic/` as snippets that yo
 
 **Known mismatches with the current repo (2026-11-01; §2 updated 2026-11-03). Apart from §2, the snippets are unchanged and need these fixed before use.** Numbers marked "probe" come from a read-only script using the real tokenizer and these snippets. They are not recorded experiments.`
 
-| # | Mismatch                                                                              | Effect                                                                                                                                                                                                                                    | What to do                                                                                                                                             |
-| - | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1 | Fixed: §2's old story KB fired 0 times on the civil-law text | §2 now holds the civil-law KB, also in `src/routes/neural-symbolic/symbolic.ts`. Probe: 9 of 5,390 positions, 0 conflicts | Keep `tests/neural-symbolic-kb.test.ts` passing, since it runs on the real tokenizer. Stop if the firing count falls to 0 |
-| 2 | §4 applies M5 only to labelled positions                                             | Where the target is allowed, it changes learning speed, not the optimum                                                                                                                                                                   | Decide whether to add unlabelled probe contexts with $\mathcal{L}_{sem}$ and no CE, and measure them for collapse                                    |
-| 3 | §7's `liftCan` emits only `can` triples, and bans come only from `cannot`      | Lifting cannot change $A_t$. Probe: top-1 probability peaks at 0.0985 against $\tau = 0.3$, on the defective baseline                                                                                                                 | Treat lifting as reporting only, or extend it with guards: freeze the original KB for the verifier, and hash the KB into the weights filename          |
-| 4 | §2's `allowed()` closes the KB once and matches only the last words of the context | There is no forward chaining over the context                                                                                                                                                                                             | Describe it this way wherever it is reported                                                                                                           |
-| 5 | §2's token index covers whole-word tokens | Probe: all 8 roles and the KB's verbs are single tokens under the current tokenizer, and only 3 of 937 tokens lack a leading space. This can change with the vocabulary | Keep checking `unenforceable`, and repeat the check after any vocabulary change |
-| 6 | §6's verifier returns only violations                                                | Zero violations looks the same as zero claims checked                                                                                                                                                                                     | Report claims parsed, and supported, contradicted and unknown                                                                                          |
-| 7 | §8's training options have no seed or KB hash                                        | Seeds 1, 2 and 3 would reload seed 42's file                                                                                                                                                                                              | Add them to the options and the filename (chapter 05 §2)                                                                                              |
-| 8 | §6, §7 and §9 still use the old KB: `cannot`, `can`, `girl` and `fly` | With the new §2, `verify` always returns no violations and `liftCan` finds no conflicts, so both look clean while checking nothing. §9's KB and hook tests fail | Rewrite them for `defined_by` and `not_defined_by` before use. These sections also say `neuro-symbolic` and `verifier.ts`, while the repo has `neural-symbolic` and `verify.ts` |
+| # | Mismatch                                                                              | Effect                                                                                                                                                                  | What to do                                                                                                                                                                                  |
+| - | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 | Fixed: §2's old story KB fired 0 times on the civil-law text                         | §2 now holds the civil-law KB, also in `src/routes/neural-symbolic/symbolic.ts`. Probe: 9 of 5,390 positions, 0 conflicts                                            | Keep `tests/neural-symbolic-kb.test.ts` passing, since it runs on the real tokenizer. Stop if the firing count falls to 0                                                                 |
+| 2 | §4 applies M5 only to labelled positions                                             | Where the target is allowed, it changes learning speed, not the optimum                                                                                                 | Decide whether to add unlabelled probe contexts with $\mathcal{L}_{sem}$ and no CE, and measure them for collapse                                                                         |
+| 3 | §7's `liftCan` emits only `can` triples, and bans come only from `cannot`      | Lifting cannot change $A_t$. Probe: top-1 probability peaks at 0.0985 against $\tau = 0.3$, on the defective baseline                                               | Treat lifting as reporting only, or extend it with guards: freeze the original KB for the verifier, and hash the KB into the weights filename                                               |
+| 4 | §2's `allowed()` closes the KB once and matches only the last words of the context | There is no forward chaining over the context                                                                                                                           | Describe it this way wherever it is reported                                                                                                                                                |
+| 5 | §2's token index covers whole-word tokens                                            | Probe: all 8 roles and the KB's verbs are single tokens under the current tokenizer, and only 3 of 937 tokens lack a leading space. This can change with the vocabulary | Keep checking `unenforceable`, and repeat the check after any vocabulary change                                                                                                           |
+| 6 | §6's verifier returns only violations                                                | Zero violations looks the same as zero claims checked                                                                                                                   | Report claims parsed, and supported, contradicted and unknown                                                                                                                               |
+| 7 | §8's training options have no seed or KB hash                                        | Seeds 1, 2 and 3 would reload seed 42's file                                                                                                                            | Add them to the options and the filename (chapter 05 §2)                                                                                                                                   |
+| 8 | §6, §7 and §9 still use the old KB: `cannot`, `can`, `girl` and `fly`      | With the new §2, `verify` always returns no violations and `liftCan` finds no conflicts, so both look clean while checking nothing. §9's KB and hook tests fail   | Rewrite them for `defined_by` and `not_defined_by` before use. These sections also say `neuro-symbolic` and `verifier.ts`, while the repo has `neural-symbolic` and `verify.ts` |
 
 ## 0. What "2b" means here, honestly
 
@@ -476,6 +476,8 @@ export function addSemanticGrad(
 
 ## 4. Wiring M5 into training
 
+> **Changed from the snippets below.** The repo does not add `lambdaS` to `train-transformer`, so the baseline stays CE only. M5 has its own trainer and worker in `src/routes/neural-symbolic/` (`train.ts`, `train-worker.ts`), with weight files named by $\lambda_s$, seed and KB hash, which also resolves mismatch #7. `backward` takes a generic optional `editDLogits` callback rather than importing the semantic loss. The verifier in §6 has also been rewritten for `defined_by` and `not_defined_by`. §7's `lift.ts` has too: it now classifies `defined_by` claims at definition frames, and the trainer reports them every epoch without adding any to the KB. Workers also total semantic loss by trigger pattern, and the trainer reports every epoch rather than every tenth.
+
 **`transformer.ts`, `backward`.** Add one optional argument, and one call right after the cross-entropy `dLogits` loop and before `addInPlace(grads.headB, ...)`:
 
 ```ts
@@ -505,7 +507,7 @@ export function backward(
 **`train.ts`.** Precompute one mask per sequence position, once, after `sequences` is built. Count the conflicts, i.e. positions where the corpus target is itself a banned token:
 
 ```ts
-// train.ts — after the `sequences` loop
+// tstrain.ts — after the `sequences` loop
 import type { SemMask } from "../neuro-symbolic/semantic-loss.js";
 import { allowed, buildTokenIndex, KnowledgeBase, RULES, TRIPLES } from "../neuro-symbolic/symbolic.js";
 
@@ -1008,3 +1010,19 @@ Limits, in addition to chapter 04 §8:
 - **Whole-word tokens only.** A word that BPE splits is reported as `unenforceable` and never partly banned.
 - **Lifting reads probabilities, not mechanisms.** A lifted triple says what the network predicts, not why.
 - **Lexical subject matching.** The KB binds `?x` to the last word, so "the eagle saw the girl flew" would wrongly bind "girl". With a 16-token window this is rare, but it can happen.
+
+// src/schemas/neuro-symbolic-request.ts
+/** Request schema for constrained generation + verification + optional lifting. */
+import { z } from "zod";
+
+export default z.object({
+  prompt: z.string().min(1).max(200).default("the girl"),
+  weightsFile: z.string().regex(/^transformer-weights-[\w.-]+\.json$/), // no path traversal
+  mode: z.enum(["off", "mask", "bias", "both"]).default("mask"),
+  lambda: z.number().min(0).max(10).default(2),
+  maxTokens: z.number().int().min(1).max(100).default(20),
+  temperature: z.number().min(0.1).max(2).default(0.8),
+  topP: z.number().min(0.1).max(1).default(0.9),
+  seed: z.number().int().default(42),
+  lift: z.boolean().default(false),
+});

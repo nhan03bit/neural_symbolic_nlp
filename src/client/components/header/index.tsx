@@ -10,6 +10,7 @@ const options: { path: RoutePath; label: string }[] = [
   { path: "/bpe-token", label: "Basic Tokenizer" },
   { path: "/train-embed", label: "Train Embeddings" },
   { path: "/train-transformer", label: "Train Transformer" },
+  { path: "/train-neural-symbolic", label: "Train Neural-Symbolic" },
 ];
 
 export function Header() {

@@ -35,7 +35,7 @@ describe("civil-law KB closure", () => {
   test("a cross-domain ban prints its proof", () => {
     const proof = kb.explain({ rel: "not_defined_by", a: "claimant", b: "owns" });
     expect(proof[0]).toContain("R-OTHER-DOMAIN");
-    expect(proof.join("\n")).toContain("defined_by(landlord,owns)  [kb]");
+    expect(proof.join("\n")).toContain("defined_by:landlord:owns [KnowledgeBase]");
   });
 });
 

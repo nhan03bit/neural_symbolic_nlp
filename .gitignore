@@ -25,3 +25,6 @@ dist-ssr
 
 .claude/*
 reports/*
+
+# Bundled by the neural-symbolic trainer at run time
+src/routes/neural-symbolic/.train-worker.mjs
