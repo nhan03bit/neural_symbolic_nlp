@@ -1,12 +1,12 @@
 # Neural-Symbolic NLP: a small transformer from scratch, Semantic Loss and Hard Mask Logit
 
-A from-scratch TypeScript pipeline (no ML libraries) that climbs from a rule-based chatbot to a GPT-style transformer, plus a design for adding a symbolic layer on top.
+A from-scratch TypeScript pipeline (no ML libraries) that climbs from a rule-based chatbot to a GPT-style transformer, plus a symbolic layer on top: a knowledge base, a hard logit mask at decoding and a semantic loss in training.
 
 The pipeline climbs from a rule-based chatbot to a GPT-style transformer in TypeScript with no ML libraries. [w3cj/how-llms-work](https://github.com/w3cj/how-llms-work) is the reference architecture: same five stages, and no code copied. Software architecture with UML diagrams is in [`docs/architecture.md`](docs/architecture.md), and the chapter-by-chapter write-up in [`docs/progress/`](docs/progress/README.md).
 
 ![Pipeline and status of each stage](docs/images/fig-pipeline.png)
 
-*Teal = built (stages 2–3 measured, stage 4 implemented). Violet = designed, not built. Border style repeats the colour for greyscale.*
+*Teal = built (stages 2–3 measured, stages 4–5 implemented). Amber = in progress (E2, run at one training seed of four). Violet = specified, not run. Border style repeats the colour for greyscale.*
 
 | Stage | What                               | State                                                                     |
 | ----- | ---------------------------------- | ------------------------------------------------------------------------- |
@@ -15,6 +15,8 @@ The pipeline climbs from a rule-based chatbot to a GPT-style transformer in Type
 | 2     | XOR network, 2→4→1 with backprop | Works, measured                                                           |
 | 3     | Skip-gram word embeddings          | Fixed (was collapsed), measured                                           |
 | 4     | Decoder-only transformer           | Done (forward, backward, Adam, top-p generation, multi-threaded training) |
+| 5     | Symbolic layer                     | Implemented: KB, hard mask, verifier, semantic loss trainer, lifting. One full-length run, one seed, described below |
+| 6     | Experiments E1–E4                  | E3 run. E2 run at one training seed of four. E1 and E4 not run           |
 
 Every number measured in this project comes from code, not typed in by hand: XOR and the seed comparison from `bun tests/ieee-data.ts`, the civil-law Skip-gram from the saved model (`.data/embedding-weights.json`). Figures quoted from papers are attributed to them.
 
@@ -251,7 +253,7 @@ The loss stops falling after about 100 epochs and the text is domain words in no
 
 # Neural symbolic integration: semantic loss in training, a hard mask at decoding
 
-A language model trained on next-token cross-entropy has no notion of truth, because the loss only rewards text that looks like the corpus. This project specifies one pipeline for a from-scratch TypeScript transformer, in which the same knowledge base (KB) shapes training through a semantic loss and constrains decoding through a hard logit mask. It measures the baselines that motivate the pipeline and leaves its effect open: the symbolic layer is implemented as a separate trainer beside the CE-only baseline, and no full-length experiment on it has been run.
+A language model trained on next-token cross-entropy has no notion of truth, because the loss only rewards text that looks like the corpus. This project specifies one pipeline for a from-scratch TypeScript transformer, in which the same knowledge base (KB) shapes training through a semantic loss and constrains decoding through a hard logit mask. It measures the baselines that motivate the pipeline and leaves its effect open: the symbolic layer is implemented as a separate trainer beside the CE-only baseline. One full-length run, at one seed and $\lambda_s = 50$, has been compared with that baseline. Of the planned experiments, E3 has been run and E2 has been run at one training seed of four; E1 and E4 have not.
 
 ## The pipeline
 
@@ -306,7 +308,7 @@ This is the "neural patterns lifted into symbolic knowledge" half of the design.
 | `conflict`  | KB derives the opposite (`not_defined_by`)   | Report with probability and proof. Direct evidence of the [reasoning gap](docs/progress/03-reasoning-gap.md)       |
 | `novel`     | Neither                                      | Accept only if $p\ge\tau$ **and** adding it creates no new contradiction                                           |
 
-**Reported only.** The neural-symbolic trainer runs [`lift.ts`](src/routes/neural-symbolic/lift.ts) at every epoch and shows each candidate's status, but a `novel` word that passes this gate is only flagged, never added to the KB. No full-length run has been recorded, so the table describes behaviour, not a result. An accepted triple is the network's belief, not ground truth, and it would stay out of the mask and the semantic loss, as the shared failure mode above requires. The design is in [chapter 07 §7](docs/progress/07-neurosymbolic-code-2b.md#7-lifting-liftts-network--symbols).
+**Reported only.** The neural-symbolic trainer runs [`lift.ts`](src/routes/neural-symbolic/lift.ts) at every epoch and shows each candidate's status, but a `novel` word that passes this gate is only flagged, never added to the KB. The table describes behaviour, not a result. The one full-length run, below, reports lifting counts for one seed only. An accepted triple is the network's belief, not ground truth, and it would stay out of the mask and the semantic loss, as the shared failure mode above requires. The design is in [chapter 07 §7](docs/progress/07-neurosymbolic-code-2b.md#7-lifting-liftts-network--symbols).
 
 ## Two separate trainers
 
@@ -320,13 +322,78 @@ The baseline and the neural-symbolic model are trained apart, so the difference 
 | Seed         | 42 only                                                        | Chosen per run                                                     |
 | Weight files | `transformer-weights-*`                                        | `neural-symbolic-weights-*`, named with $\lambda_s$, seed and KB hash |
 
-The compare view on the neural-symbolic page runs both models on one prompt and sampling seed, with the mask off and on. It shows their text, the mask trace, the verifier's claim counts and the banned mass at each definition frame. The same page draws the cross-entropy and semantic loss as training runs, with a dashboard of the latest epoch's numbers by trigger pattern. A saved λ = 0 run with the same settings appears as a dashed control on the semantic loss chart. It also gives every epoch one card: the trigger patterns, the rules violated (a blocked word's mean p at its pattern is at least 0.02), each lifted pattern's status, the semantic loss and the banned mass.
+The compare view on the neural-symbolic page runs both models on one prompt and sampling seed, with the mask off and on. It shows their text, the mask trace, the verifier's claim counts and the banned mass at each definition frame. The same page draws the cross-entropy and semantic loss as training runs, with a dashboard of the latest epoch's numbers by trigger pattern. The longest saved λ = 0 run with the same settings appears as a dashed control on the semantic loss chart, for the epochs it covers. It also gives every epoch one card: the trigger patterns, the rules violated (a blocked word's mean p at its pattern is at least 0.02), each lifted pattern's status, the semantic loss and the banned mass.
 
-[A test](tests/neural-symbolic-train.test.ts) shows that at $\lambda_s = 0$ and seed 42 the new trainer saves the baseline's weights and losses, for a short run (3 epochs, 1 layer, weights compared at their saved 6 decimal places). This makes $\lambda_s = 0$ the CE-only control at seeds the baseline does not offer. Corpus positions are the only ones trained on, so the term still fires at 86 of 85,984 of them. **Implemented, but no full-length run has been compared**, so no effect is claimed.
+[A test](tests/neural-symbolic-train.test.ts) shows that at $\lambda_s = 0$ and seed 42 the new trainer saves the baseline's weights and losses, for a short run (3 epochs, 1 layer, weights compared at their saved 6 decimal places). This makes $\lambda_s = 0$ the CE-only control at seeds the baseline does not offer. Corpus positions are the only ones trained on, so the term still fires at 86 of 85,984 of them. **One full-length run has been compared**, below. It is one seed at one $\lambda_s$, so no effect is claimed.
+
+## One full-length run: $\lambda_s = 50$ against the CE-only baseline
+
+**One seed, one $\lambda_s$, trained on all text. This describes two models; it does not measure an effect of the loss.** $\lambda_s = 50$ was chosen after 300-epoch trial runs at $\lambda_s \in \{0, 2, 10, 50\}$, simply as the highest value tried. This is not the E4 ablation ($\lambda_s = 2$, four seeds, held-out loss), whose cells below stay pending.
+
+Sent from the neural-symbolic page as `2000 0.8 0.9 2 40 50 42` (2 layers, seed 42, about 90 minutes from checkpoint timestamps). The control is the same trainer at $\lambda_s = 0$ (`2000 0.8 0.9 2 40 0 42`, run headless in 149 minutes). Its epoch-2000 weights are identical to the baseline's, as are all 210 logged baseline losses, so the control is also the CE-only baseline. The next table is read from the saved weights at the 86 training positions where the KB fires:
+
+- **Semantic loss:** averaged over every window position, as in training.
+- **Banned mass:** the mean probability of KB-banned words.
+- **p(next corpus word):** the mean probability of the word that actually follows.
+- **p(role's own verb):** the mean probability of the verb the KB defines the role by, such as *brings* for *claimant*.
+
+| Epoch | Model | Semantic loss | Banned mass | p(next corpus word) | p(role's own verb) |
+| ----- | ----- | ------------- | ----------- | ------------------- | ------------------ |
+| 300   | CE only            | 7.73e-5     | 0.0725     | **0.045** | **0.033** |
+|       | CE + semantic loss | **9.85e-6** | **0.0098** | 0.036     | 0.012     |
+| 600   | CE only            | 3.72e-4     | 0.2831     | **0.339** | **0.249** |
+|       | CE + semantic loss | **1.34e-5** | **0.0133** | 0.236     | 0.140     |
+| 1000  | CE only            | 2.06e-4     | 0.1647     | 0.739     | 0.612     |
+|       | CE + semantic loss | **2.34e-6** | **0.0023** | **0.866** | **0.732** |
+| 2000  | CE only            | 4.58e-5     | 0.0419     | 0.946     | 0.809     |
+|       | CE + semantic loss | **6.26e-7** | **0.0006** | **0.978** | **0.841** |
+
+- **The banned mass is lower at every epoch above.** At epoch 2000, semantic loss is 73 times lower. Both curves rise and then fall. The semantic loss logged during training peaks at 4.73e-4 (epoch 689) without the term and at 2.26e-5 (epoch 585) with it.
+- **The early cost does not last in this run.** Up to about epoch 600 the term also slows the allowed words at these positions, including the role's own verb. By epoch 1000 it is ahead on both probabilities.
+- **The training loss costs a little.** Final cross-entropy is 0.2524 against 0.2489. Both models trained on all text and copy it, so this is not a held-out measure.
+
+![Cross-entropy and semantic loss by epoch for the λ = 50 run, with the λ = 0 control dashed on the semantic loss chart: the control rises to 4.732e-4 and falls to 4.520e-5, while λ = 50 stays near the bottom and ends at 7.549e-7](docs/images/ns-l50-vs-l0-e2000-loss.png)
+
+The training log records rule violations and lifted patterns at every epoch, read from the weights before that epoch's update. A rule counts as violated when its banned word's mean p at its trigger pattern is at least 0.02. There are 48 rules.
+
+| Epoch | Rules violated, CE only | Rules violated, CE + semantic loss | Lifted confirmed / conflict / novel, CE only | Lifted, CE + semantic loss |
+| ----- | ----------------------- | ---------------------------------- | -------------------------------------------- | -------------------------- |
+| 100   | 0  | 0 | 0 / 0 / 1    | 0 / 0 / 3    |
+| 200   | 5  | 0 | 1 / 6 / 57   | 1 / 1 / 56   |
+| 300   | 5  | 0 | 2 / 8 / 91   | 1 / 2 / 90   |
+| 400   | 23 | 0 | 7 / 32 / 134 | 3 / 9 / 115  |
+| 600   | 26 | 1 | 7 / 43 / 54  | 7 / 18 / 79  |
+| 1000  | 22 | 0 | 8 / 42 / 15  | 7 / 14 / 26  |
+| 1500  | 11 | 0 | 8 / 35 / 5   | 8 / 14 / 8   |
+| 2000  | 7  | 0 | 8 / 32 / 5   | 8 / 15 / 4   |
+
+Across all 2001 logged epochs, the CE-only model violates at least one rule at 1846 of them, with a maximum of 29 rules at epoch 529. The neural-symbolic model violates at least one at 175 of them, with a maximum of 3 at epoch 585, and none after epoch 1746. The CE-only model's 7 violations at epoch 2000 are all on the claimant and defendant frames, led by *claimant → answers* at p = 0.124.
+
+**It acts where it fires, and not reliably beyond.** Each role appears in only one of the three definition frames in the corpus, such as *trader* only in "is a business that". The compare view probes all 24 role-and-frame contexts with the prompt alone, with the mask off:
+
+| Contexts | Baseline, mean banned mass | Neural-symbolic | Lower / higher |
+| -------- | -------------------------- | --------------- | -------------- |
+| 8 trained (the role's corpus frame)  | 0.0959 | 0.0013 | 7 / 1 (0.000000 → 0.000004) |
+| 16 untrained (the other two frames) | 0.6154 | 0.4975 | 9 / 7 |
+| of which "is a business that", 7 roles | 0.7787 | 0.8331 | 1 / 6 |
+
+Lifting shows the same split. At epoch 2000, conflicts with the KB on trained frames fall from 4 to 0. Conflicts on untrained frames fall from 28 to 15, but nearly all of the confident ones (p ≥ 0.3) remain: 9 against 10. These conflicts are mostly "sells" after "is a business that", at p 0.81–0.96 for 6 roles, which suggests the frame, not the role, drives the prediction there. That reading is not tested separately.
+
+With the prompt `the claimant is the person who` (sampling seed 42, T = 0.8, top-p 0.9), both models write the same text with the mask off and on: "brings a claim. the defendant is the person who answers a claim. the claimant asks the court for". The verifier finds 2 supported claims and 0 contradicted. The mask trace shows the difference before sampling: banned mass at step 0 is 0.3252 for the baseline and 0.0026 for the neural-symbolic model. These prompt-only contexts lack the text before them in the corpus windows, so their values differ from the table above.
+
+Weights: `.data/neural-symbolic-weights-e2000-l2-d32-h2-ff128-ctx32-cbf9d5315-k91eeb742-ls50-s42-n3-v4.json` ($\lambda_s = 50$), `.data/neural-symbolic-weights-e2000-l2-d32-h2-ff128-ctx32-cbf9d5315-k91eeb742-ls0-s42-n3-v4.json` ($\lambda_s = 0$) and `.data/transformer-weights-e2000-l2-d32-h2-ff128-ctx32-cbf9d5315-v4.json` (baseline).
+
+<details>
+<summary>Screenshots of the run</summary>
+
+![Epoch 1914: all 8 trigger patterns, no rule violated, the lifted patterns with confirmed, conflict and novel marks, semantic loss 5.730e-7 and banned mass 0.000572](docs/images/ns-l50-e2000-epoch-card.png)
+![Cross-entropy and semantic loss by epoch to epoch 2000, final loss 0.2524. The dashed λ = 0 control ends at epoch 300, the longest λ = 0 run saved when this was taken](docs/images/ns-l50-e2000-loss-compare.png)
+
+</details>
 
 ## What is measured so far
 
-Everything below ran with no KB, mask or semantic loss.
+Everything below ran with no KB, mask or semantic loss. The one full-length run with the semantic loss is in the section above.
 
 | Baseline                                                                | Measure                                                    | Value                           |
 | ----------------------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------- |
@@ -360,7 +427,16 @@ These samples show that this happens, not how often. On held-out stories, a larg
 
 P1 and P2 follow from the construction, so they test the implementation. P3–P7 are empirical and may fail.
 
-**Experiments, none run.** E1: seed sensitivity. E2: violation rate with the mask off and on. E3: one full trace. E4: the ablation below, at $\lambda_s \in \{0, 2\}$ and seeds 42, 1, 2, 3. The CE-only arm at seeds 1, 2 and 3 comes from the neural-symbolic trainer at $\lambda_s = 0$.
+**Experiments: E3 run, E2 at one training seed, E1 and E4 not run.** Results are [below](#e2-and-e3-at-one-training-seed). The full-length $\lambda_s = 50$ run above is outside this plan and fills none of the E4 cells. The full protocols are in [chapter 05 §2](docs/progress/05-implementation-and-evaluation.md). This is what each still needs:
+
+| Experiment | Tests | In place now | Left to do |
+| ---------- | ----- | ------------ | ---------- |
+| E1: seed sensitivity | P4 | The neural-symbolic trainer takes a seed, and at $\lambda_s = 0$ it is the CE-only model. Seed 42 is trained to 2000 epochs. | Train seeds 1, 2 and 3 at $\lambda_s = 0$. Write the comparison: weight L2 and cosine per seed pair, and logit cosine on fixed held-out prompts. |
+| E2: violation rate, mask off and on | P1, P3 | Run at training seed 42 ([`tests/e2-e3-experiment.ts`](tests/e2-e3-experiment.ts)): 24 prompts × 50 sampling seeds, mask off and on, verifier counts. | Repeat at training seeds 1, 2 and 3 once E1 has trained them. Compute perplexity from the weights alone on held-out text, which needs the held-out split. |
+| E3: one full trace | — | Run: one generation's trace for both models, [below](#e2-and-e3-at-one-training-seed). | Nothing. |
+| E4: loss × mask ablation | P5, P6, P7 | $\lambda_s = 0$ and $\lambda_s = 2$ at seed 42 for 300 epochs only. $\lambda_s = 50$ at seed 42 for 2000 epochs, above. | Train $\lambda_s = 2$ at seeds 42, 1, 2 and 3 for 2000 epochs; the $\lambda_s = 0$ arms are shared with E1. Add a held-out split to the neural-symbolic trainer, which trains on all text (the 4-fold test above is a separate script, `tests/search-transformer.ts`). Add the probe contexts outside training for `massBefore`. |
+
+E1 and E4 together need seven new 2000-epoch trainings. Recorded runs on this machine took 86 to 149 minutes each, so roughly 10 to 18 hours. The CE-only arm at seeds 1, 2 and 3 comes from the neural-symbolic trainer at $\lambda_s = 0$.
 
 | Arm                       | `massBefore` | Violations, mask off | Violations a token mask cannot express | Held-out CE, non-conflicting targets |
 | ------------------------- | -------------- | -------------------- | -------------------------------------- | ------------------------------------ |
@@ -368,6 +444,41 @@ P1 and P2 follow from the construction, so they test the implementation. P3–P7
 | CE + semantic loss        | pending        | pending              | pending                                | pending                              |
 | CE + mask                 | pending        | pending              | pending                                | pending                              |
 | CE + semantic loss + mask | pending        | pending              | pending                                | pending                              |
+
+### E2 and E3 at one training seed
+
+**One training seed (42), so E2 is partial: its protocol asks for seeds 42, 1, 2 and 3.** Run with `bun tests/e2-e3-experiment.ts` (5 minutes), which writes `reports/e2-e3-seed42.json`. Everything below was fixed before running.
+
+- **Models.** The CE-only baseline and the $\lambda_s = 50$ model from the full-length run above, both 2000 epochs.
+- **Prompts.** Every role in every definition frame, 8 × 3 = 24, such as "the claimant is the person who". The rule fires at the first generated token. 8 prompts occur in the training text, because each role appears there in one frame. The other 16 put a role in a frame it never appears in, such as "the claimant is a business that".
+- **Sampling.** Sampling seeds 0–49 per prompt, 20 tokens, at the compare view's default (T = 0.8, top-p 0.9) and at the full distribution (T = 1, top-p 1).
+- **Mask off.** The processor runs with $\lambda = 0$ in `bias` mode, which edits nothing but records `massBefore`. All 4,800 mask-off texts were checked against plain generation, and none differed (P2).
+- **Violations.** Claims the verifier parsed and found contradicted by the KB. A sample can hold several claims, and the 95% Wilson interval below treats them as independent, so it is too narrow. It also covers sampling only, not training seeds.
+- **Not computed.** Perplexity on held-out text, because the neural-symbolic trainer has no held-out split.
+
+| Prompts | Model | Mask off, T 0.8, top-p 0.9 | Mask off, T 1, top-p 1 | Mask on, both settings |
+| ------- | ----- | -------------------------- | ---------------------- | ---------------------- |
+| 8 in the training text | CE only | 7 / 598 (1.2%, 0.6–2.4%) | 28 / 578 (4.8%, 3.4–6.9%) | 0 / 600, 0 / 578 |
+| 8 in the training text | CE + SL ($\lambda_s = 50$) | 0 / 600 (0–0.6%) | 0 / 573 (0–0.7%) | 0 / 600, 0 / 573 |
+| 16 not in the training text | CE only | 515 / 1,253 (41.1%, 38.4–43.9%) | 522 / 1,203 (43.4%, 40.6–46.2%) | 0 / 938, 0 / 892 |
+| 16 not in the training text | CE + SL ($\lambda_s = 50$) | 430 / 1,213 (35.4%, 32.8–38.2%) | 420 / 1,159 (36.2%, 33.5–39.1%) | 0 / 865, 0 / 839 |
+
+*Contradicted / parsed claims, with the 95% interval. 400 samples per cell for the training-text prompts and 800 for the others.*
+
+- **With the mask on, no parsed claim contradicts the KB:** 0 of 5,885 claims across all eight cells. This holds by construction, so it checks the implementation (P1), not the model.
+- **With the mask off, the CE-only model contradicts the KB.** On the 8 training-text prompts, 1.2% of claims at T = 0.8 and 4.8% at T = 1 contradict it. On the 16 others, 41–43% do.
+- **On the training-text prompts, the $\lambda_s = 50$ model made no contradicted claims in 1,173.** Its mean `massBefore` where a rule fired was 0.0010 and 0.0028, against 0.0739 and 0.0771 for CE only. These prompts are training contexts, so this is behaviour on text it was trained on, at one seed.
+- **On the other 16 prompts, it still contradicts the KB in 35–36% of claims.** At T = 0.8, 315 of its 430 contradicted claims are "sells" after "is a business that", the verb of trader, the one role trained in that frame. Another 100 are "buys" after "is a person who", the verb of consumer, the one role trained there. CE only does the same: 296 and 126 of its 515. Each model completes a frame with the verb of the role trained in it, whatever the role. This is the same failure to transfer the rule that the full-length run showed.
+- **On those 16 prompts, the mask mostly turns contradicted claims into unknown ones.** For CE only at T = 0.8, unknown claims rise from 50 to 443 and supported claims fall from 688 to 495. The mask removes the banned verb, but the verb sampled in its place is mostly one the KB has no fact about.
+
+**E3: one full trace.** The prompt is "the claimant is the person who", at sampling seed 42 (the compare view's default) and T = 0.8, top-p 0.9, mask on. Both models generated the same text, "the claimant is the person who brings a claim. the defendant is the person who answers a claim. the claimant asks the court for". The verifier parsed 2 claims, and both were supported. A rule fired at 2 of the 20 steps:
+
+| Step | Context ends | Rules fired | Masked tokens | `massBefore`, CE only | `massBefore`, $\lambda_s = 50$ | `massAfter` | Chosen |
+| ---- | ------------ | ----------- | ------------- | --------------------- | ----------------------------- | ----------- | ------ |
+| 0 | the claimant is the person who | 6 bans (answers by R-COUNTER; owns, rents, sells, buys, owes by R-OTHER-DOMAIN), 1 support (brings) | answers, owns, rents, sells, buys, owes | 0.3252 | 0.0026 | 0 | brings |
+| 10 | the defendant is the person who | 6 bans (brings by R-COUNTER; owns, rents, sells, buys, owes by R-OTHER-DOMAIN), 1 support (answers) | brings, owns, rents, sells, buys, owes | 0.0192 | 0.0002 | 0 | answers |
+
+At the other 18 steps no rule fired, so the mask changed nothing. Each model's full 20-step trace is in the JSON report.
 
 ## Towards neurosymbolic world models
 

@@ -116,16 +116,24 @@ def pipeline():
         ("Stage 2", "XOR net", "backprop", "measured", "measured"),
         ("Stage 3", "Skip-gram", "embeddings", "measured", "measured"),
         ("Stage 4", "Transformer", "decoder-only", "measured", "implemented"),
-        ("Stage 5", "Symbolic layer", "KB + verifier", "design", "design only"),
-        ("Stage 6", "Experiments", "E1 – E3", "design", "not run"),
+        ("Stage 5", "Symbolic layer", "KB, mask, loss", "measured", "implemented, 1 run"),
+        ("Stage 6", "Experiments", "", "design", "E3 run, E2 partial"),
     ]
+    # Stage 6 is drawn as the four planned experiments, so the figure shows what is left.
+    # Each experiment carries its own status: E3 is run, E2 is run at one training seed of four.
+    experiments = [("E1  seed sensitivity", "design"), ("E2  violations, mask", "wip"),
+                   ("E3  trace demo", "measured"), ("E4  loss × mask", "design")]
     xs = np.linspace(0.85, 10.65, len(items))
     for i, (x, (a, b, c, k, note)) in enumerate(zip(xs, items)):
-        node(ax, x, 1.2, 1.38, 1.15, f"{a}\n{b}\n{c}", k, fs=8.5)
+        if a == "Stage 6":
+            for j, (name, kind) in enumerate(experiments):
+                node(ax, x, 1.635 - j * 0.29, 1.38, 0.24, name, kind, fs=7)
+        else:
+            node(ax, x, 1.2, 1.38, 1.15, f"{a}\n{b}\n{c}", k, fs=8.5)
         ax.text(x, 0.45, note, ha="center", fontsize=8, style="italic", color=MUTED)
         if i:
             arrow(ax, (xs[i - 1] + 0.72, 1.2), (x - 0.72, 1.2))
-    legend_status(ax, 0.2, -0.15, kinds=("measured", "design"))
+    legend_status(ax, 0.2, -0.15, kinds=("measured", "wip", "design"))
     save(fig, "fig-pipeline.png")
 
 

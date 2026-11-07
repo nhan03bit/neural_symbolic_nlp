@@ -17,6 +17,7 @@ import { addSemanticGrad, semanticLoss } from "../src/routes/neural-symbolic/sem
 import { buildTokenIndex, KnowledgeBase, RULES, TRIPLES } from "../src/routes/neural-symbolic/symbolic.js";
 import {
   buildSemMasks,
+  findControlFile,
   findViolations,
   neuralSymbolicConfig,
   neuralSymbolicWeightsFilename,
@@ -51,15 +52,15 @@ const kb = new KnowledgeBase(TRIPLES, RULES);
 
 const read = (file: string) => JSON.parse(readFileSync(join(sandbox, ".data", file), "utf-8"));
 
-async function runNeuralSymbolic(lambdaS: number, seed = 42) {
-  const opts: NeuralSymbolicOpts = { ...SETTINGS, lambdaS, seed };
+async function runNeuralSymbolic(lambdaS: number, seed = 42, epochs = EPOCHS) {
+  const opts: NeuralSymbolicOpts = { ...SETTINGS, epochs, lambdaS, seed };
   let init: NeuralSymbolicInit | undefined;
   const events: object[] = [];
   for await (const event of trainNeuralSymbolic(opts)) {
     if ("vocabSize" in event) init = event;
     events.push(event);
   }
-  return { init: init!, events, file: neuralSymbolicWeightsFilename(EPOCHS, cfg, lambdaS, seed) };
+  return { init: init!, events, file: neuralSymbolicWeightsFilename(epochs, cfg, lambdaS, seed) };
 }
 
 function softmax(z: number[]) {
@@ -209,6 +210,25 @@ describe("per-epoch report", () => {
     const noControl = await runNeuralSymbolic(1, 7);
     expect(noControl.init.control).toBeNull();
   }, TIMEOUT);
+
+  test("a run of another length still gets the saved λ = 0 run as its control", async () => {
+    const control = await runNeuralSymbolic(0);
+    const saved = read(control.file).history as NeuralSymbolicEpoch[];
+
+    const { init } = await runNeuralSymbolic(1, 42, EPOCHS + 1);
+    expect(init.control?.semLoss).toEqual(saved.map((e) => e.semLoss));
+    expect(init.control?.semLoss).toHaveLength(EPOCHS + 1);
+  }, TIMEOUT);
+
+  test("the control is the matching λ = 0 file covering the most epochs", () => {
+    const name = (epochs: number, lambdaS = 0, seed = 42) => neuralSymbolicWeightsFilename(epochs, cfg, lambdaS, seed);
+    const at = (file: string, epoch: number) => file.replace(/\.json$/, `-at${epoch}.json`);
+
+    expect(findControlFile([name(300), name(100)], cfg, 42)).toBe(name(300));
+    expect(findControlFile([at(name(2000), 100), name(300)], cfg, 42)).toBe(name(300));
+    expect(findControlFile([at(name(2000), 500), name(300)], cfg, 42)).toBe(at(name(2000), 500));
+    expect(findControlFile([name(300, 2), name(300, 0, 7), "notes.json"], cfg, 42)).toBeNull();
+  });
 
   test("λ can go up to 50, the strongest setting tested", () => {
     const body = { epochs: 50, temperature: 0.8, topP: 0.9, numLayers: 2, maxTokens: 20 };

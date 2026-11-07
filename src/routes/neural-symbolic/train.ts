@@ -13,7 +13,7 @@ import type { EpochResult, InitResult, TransformerTrainResult } from "../train-t
 import type { TransformerConfig } from "../train-transformer/transformer.js";
 import type { SemMask } from "./semantic-loss.js";
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import { cpus } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
@@ -236,11 +236,29 @@ export function buildSemMasks(
   return { semMasks, semGroups, ruleTokens, triggers, constrainedPositions, totalPositions, corpusConflicts };
 }
 
-/** The saved λ = 0 run for these settings, or null if this run is that one or none has been saved. */
-async function readControl(path: string, lambdaS: number): Promise<NeuralSymbolicInit["control"]> {
+/**
+ * The saved λ = 0 file covering the most epochs, final or checkpoint. The epoch count only sets
+ * where training stops, so a run of any length is a valid control for the epochs it covers.
+ */
+export function findControlFile(files: string[], cfg: TransformerConfig, seed: number): string | null {
+  const settings = neuralSymbolicWeightsFilename(0, cfg, 0, seed).replace(/^neural-symbolic-weights-e0-|\.json$/g, "");
+  let best: { file: string; covered: number } | null = null;
+  for (const file of files) {
+    const match = /^neural-symbolic-weights-e(\d+)-(.+?)(?:-at(\d+))?\.json$/.exec(file);
+    if (match?.[2] !== settings) continue;
+    const covered = Number(match[3] ?? match[1]);
+    if (!best || covered > best.covered) best = { file, covered };
+  }
+  return best?.file ?? null;
+}
+
+/** The control's semantic loss, or null if this run is λ = 0 or no matching run has been saved. */
+async function readControl(dataDir: string, cfg: TransformerConfig, seed: number, lambdaS: number): Promise<NeuralSymbolicInit["control"]> {
   if (lambdaS === 0) return null;
   try {
-    const { history } = JSON.parse(await readFile(path, "utf-8")) as { history: { semLoss: number }[] };
+    const file = findControlFile(await readdir(dataDir), cfg, seed);
+    if (!file) return null;
+    const { history } = JSON.parse(await readFile(join(dataDir, file), "utf-8")) as { history: { semLoss: number }[] };
     return { semLoss: history.map((entry) => entry.semLoss) };
   } catch {
     return null;
@@ -313,7 +331,7 @@ export async function* trainNeuralSymbolic(
   const weightsPath = join(dataDir, weightsFile);
   const checkpointPath = (epoch: number) => join(dataDir, weightsFile.replace(/\.json$/, `-at${epoch}.json`));
   const baselineFile = baselineWeightsFilename(epochs, cfg);
-  const control = await readControl(join(dataDir, neuralSymbolicWeightsFilename(epochs, cfg, 0, seed)), lambdaS);
+  const control = await readControl(dataDir, cfg, seed, lambdaS);
 
   const initEvent = (totalParams: number): NeuralSymbolicInit => ({
     vocabSize,

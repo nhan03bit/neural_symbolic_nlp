@@ -67,10 +67,10 @@ export function LossChart({ title, values, format, active, lastEpoch, onHover, r
         <span>epoch 0</span>
         <span>epoch {lastEpoch}</span>
       </div>
-      {compared && compared[active] !== undefined && (
+      {compared && (
         <div class={styles.chartLegend}>
           <span><i class={styles.legendLine} /> this run {format(values[active])}</span>
-          <span><i class={styles.legendReference} /> {referenceLabel} {format(compared[active])}</span>
+          <span><i class={styles.legendReference} /> {referenceLabel} {compared[active] === undefined ? `ends at epoch ${compared.length - 1}` : format(compared[active])}</span>
         </div>
       )}
     </figure>
