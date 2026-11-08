@@ -116,13 +116,13 @@ def pipeline():
         ("Stage 2", "XOR net", "backprop", "measured", "measured"),
         ("Stage 3", "Skip-gram", "embeddings", "measured", "measured"),
         ("Stage 4", "Transformer", "decoder-only", "measured", "implemented"),
-        ("Stage 5", "Symbolic layer", "KB, mask, loss", "measured", "implemented, 1 run"),
-        ("Stage 6", "Experiments", "", "design", "E3 run, E2 partial"),
+        ("Stage 5", "Symbolic layer", "KB, mask, loss", "measured", "implemented, 9 runs"),
+        ("Stage 6", "Experiments", "", "design", "E1–E3 run, E4 partial"),
     ]
     # Stage 6 is drawn as the four planned experiments, so the figure shows what is left.
-    # Each experiment carries its own status: E3 is run, E2 is run at one training seed of four.
-    experiments = [("E1  seed sensitivity", "design"), ("E2  violations, mask", "wip"),
-                   ("E3  trace demo", "measured"), ("E4  loss × mask", "design")]
+    # Each experiment carries its own status: E1–E3 are run at four seeds; E4 lacks its held-out measures.
+    experiments = [("E1  seed sensitivity", "measured"), ("E2  violations, mask", "measured"),
+                   ("E3  trace demo", "measured"), ("E4  loss × mask", "wip")]
     xs = np.linspace(0.85, 10.65, len(items))
     for i, (x, (a, b, c, k, note)) in enumerate(zip(xs, items)):
         if a == "Stage 6":
