@@ -242,6 +242,19 @@ function buildWorkerBundle(): string {
  * exactly the token ids the route would train on.
  */
 export function buildVocabulary(numMerges = 2000) {
+  let vocabulary = vocabularies.get(numMerges);
+  if (!vocabulary) {
+    vocabulary = trainVocabulary(numMerges);
+    vocabularies.set(numMerges, vocabulary);
+  }
+  return vocabulary;
+}
+
+// BPE takes about a second here, and a free host's share of a CPU stretches that past ten, before
+// a request can send anything. It depends only on the corpus, so each size is trained once.
+const vocabularies = new Map<number, ReturnType<typeof trainVocabulary>>();
+
+function trainVocabulary(numMerges: number) {
   const corpusText = TRAIN_TEXTS.map((s) => ` ${s}`)
     .join("")
     .toLowerCase();

@@ -27,7 +27,11 @@ export type UseSSEChatOptions<TState, TEvent = Record<string, unknown>> = {
   tagline: string;
   buildBody?: (input: string) => unknown;
   initState: () => TState;
-  onEvent: (parsed: TEvent, state: TState) => Child | undefined;
+  /**
+   * Returns JSX to draw now, or undefined to leave the view as it is. `redraw` draws later, for a
+   * feature that skips events and must not leave the last one undrawn when the stream pauses.
+   */
+  onEvent: (parsed: TEvent, state: TState, redraw: (content: Child) => void) => Child | undefined;
   mode?: "json" | "multiline";
 };
 
@@ -78,20 +82,18 @@ export function useSSEChat<TState, TEvent = Record<string, unknown>>(
 
     try {
       const state = initState();
+      const show = (content: Child) =>
+        setMessages((previous) =>
+          previous.map((m) => (m.id === assistantId ? { ...m, content } : m)),
+        );
       const result = await readSSE<TEvent>({
         endpoint,
         body: buildBody(input),
         mode,
         onOpen: () => setLoading(false),
         onEvent: (parsed) => {
-          const content = onEvent(parsed, state);
-          if (content !== undefined) {
-            setMessages((previous) =>
-              previous.map((m) =>
-                m.id === assistantId ? { ...m, content } : m,
-              ),
-            );
-          }
+          const content = onEvent(parsed, state, show);
+          if (content !== undefined) show(content);
         },
       });
 

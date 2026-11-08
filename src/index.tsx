@@ -9,6 +9,7 @@ import bpeTokenize from "./routes/bpe-tokenize";
 import trainEmbed from "./routes/train-embed";
 import trainTransformer from "./routes/train-transformer";
 import neuralSymbolic from "./routes/neural-symbolic";
+import { warmUp } from "./routes/neural-symbolic/train";
 
 const app = new Hono();
 
@@ -76,5 +77,7 @@ if (import.meta.env.PROD) {
   const port = Number(process.env.PORT || 3000);
   serve({ fetch: app.fetch, port }, () => {
     console.log(`Server started on http://localhost:${port}`);
+    // After listening, so the host sees the port open; the first request then finds it built.
+    setTimeout(warmUp, 0);
   });
 }

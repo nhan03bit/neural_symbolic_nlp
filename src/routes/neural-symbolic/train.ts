@@ -281,6 +281,54 @@ function buildWorkerBundle(): string {
   return outfile;
 }
 
+// The windows and their rule masks depend only on the corpus, the KB and the window length. A
+// request on a free host's share of a CPU would otherwise rebuild them for many seconds before its
+// first event, so each window length is built once per process.
+const corpora = new Map<number, ReturnType<typeof buildTrainingCorpus>>();
+
+// A saved run's final losses need a forward pass over every window, seconds of CPU on a free host,
+// and the file does not change, so they are measured once per process.
+const savedLosses = new Map<string, { finalLoss: number; finalSemLoss: number }>();
+
+/**
+ * Builds the vocabulary and the training windows ahead of the first request. A free host sleeps
+ * when idle, so most visits meet a fresh process, and these cost it tens of seconds before the
+ * page can show anything.
+ */
+export function warmUp(): void {
+  trainingCorpus(Math.min(neuralSymbolicConfig(buildVocabulary().indexToWord.length, 2).contextLen, 16));
+}
+
+function trainingCorpus(seqLen: number) {
+  let corpus = corpora.get(seqLen);
+  if (!corpus) {
+    corpus = buildTrainingCorpus(seqLen);
+    corpora.set(seqLen, corpus);
+  }
+  return corpus;
+}
+
+function buildTrainingCorpus(seqLen: number) {
+  const { tokenize, indexToWord, wordToIndex } = buildVocabulary();
+  const allTokenIds: number[] = [];
+  for (const sentence of TRAIN_TEXTS) {
+    for (const tok of tokenize(sentence)) {
+      const idx = wordToIndex.get(tok);
+      if (idx !== undefined) allTokenIds.push(idx);
+    }
+  }
+
+  const sequences: { input: number[]; target: number[] }[] = [];
+  for (let i = 0; i <= allTokenIds.length - seqLen - 1; i++) {
+    sequences.push({
+      input: allTokenIds.slice(i, i + seqLen),
+      target: allTokenIds.slice(i + 1, i + seqLen + 1),
+    });
+  }
+
+  return { allTokenIds, sequences, ...buildSemMasks(sequences, indexToWord) };
+}
+
 export async function* trainNeuralSymbolic(
   opts: NeuralSymbolicOpts,
 ): AsyncGenerator<NeuralSymbolicInit | NeuralSymbolicEpoch | NeuralSymbolicDone> {
@@ -291,25 +339,10 @@ export async function* trainNeuralSymbolic(
   const vocabSize = indexToWord.length;
   const cfg = neuralSymbolicConfig(vocabSize, numLayers);
 
-  const allTokenIds: number[] = [];
-  for (const sentence of TRAIN_TEXTS) {
-    for (const tok of tokenize(sentence)) {
-      const idx = wordToIndex.get(tok);
-      if (idx !== undefined) allTokenIds.push(idx);
-    }
-  }
-
-  const seedIds = allTokenIds.slice(0, 3);
   const seqLen = Math.min(cfg.contextLen, 16);
-  const sequences: { input: number[]; target: number[] }[] = [];
-  for (let i = 0; i <= allTokenIds.length - seqLen - 1; i++) {
-    sequences.push({
-      input: allTokenIds.slice(i, i + seqLen),
-      target: allTokenIds.slice(i + 1, i + seqLen + 1),
-    });
-  }
-
-  const { semMasks, semGroups, ruleTokens, triggers, constrainedPositions, totalPositions, corpusConflicts } = buildSemMasks(sequences, indexToWord);
+  const { allTokenIds, sequences, semMasks, semGroups, ruleTokens, triggers, constrainedPositions, totalPositions, corpusConflicts } =
+    trainingCorpus(seqLen);
+  const seedIds = allTokenIds.slice(0, 3);
   // A KB that never fires would train identically to the baseline and look like a null result.
   if (constrainedPositions === 0) throw new Error("The KB fires at no training position, so there is nothing to compare.");
 
@@ -362,9 +395,9 @@ export async function* trainNeuralSymbolic(
     return { finalLoss: roundLoss(ce / sequences.length), finalSemLoss: roundSem(sem / sequences.length) };
   };
 
-  const doneEvent = (architecture: string, w: ReturnType<typeof initWeights>, samples: { epoch: number; text: string }[]): NeuralSymbolicDone => ({
+  const doneEvent = (architecture: string, losses: ReturnType<typeof measure>, samples: { epoch: number; text: string }[]): NeuralSymbolicDone => ({
     architecture,
-    ...measure(w),
+    ...losses,
     samples,
     weightsFile,
     baselineFile,
@@ -390,7 +423,12 @@ export async function* trainNeuralSymbolic(
       yield { ...saved, sample };
     }
 
-    yield doneEvent(`${describe} — cached`, cached.weights, samples);
+    let losses = savedLosses.get(weightsFile);
+    if (!losses) {
+      losses = measure(cached.weights);
+      savedLosses.set(weightsFile, losses);
+    }
+    yield doneEvent(`${describe} — cached`, losses, samples);
     return;
   }
 
@@ -544,5 +582,7 @@ export async function* trainNeuralSymbolic(
 
   copyWeightsFromSab(weightSab, layout, w);
   await saveAs(weightsPath, history);
-  yield doneEvent(describe, w, collectedSamples);
+  const losses = measure(w);
+  savedLosses.set(weightsFile, losses);
+  yield doneEvent(describe, losses, collectedSamples);
 }
