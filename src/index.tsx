@@ -75,7 +75,9 @@ export default app;
 
 if (import.meta.env.PROD) {
   const port = Number(process.env.PORT || 3000);
-  serve({ fetch: app.fetch, port }, () => {
+  // 0.0.0.0, not Node's default "::": Render's port scan looks for an IPv4 listener and logs
+  // "No open HTTP ports detected on 0.0.0.0" when it sees only the IPv6 one.
+  serve({ fetch: app.fetch, port, hostname: "0.0.0.0" }, () => {
     console.log(`Server started on http://localhost:${port}`);
     // After listening, so the host sees the port open; the first request then finds it built.
     setTimeout(warmUp, 0);

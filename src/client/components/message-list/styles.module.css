@@ -2,4 +2,8 @@
   flex: 1;
   overflow-y: auto;
   padding: var(--space-4);
+  /* useAutoScroll owns this list's scroll position. With the browser's scroll anchoring on, an
+     anchor inside the reversed epoch box moves as cards arrive, and the browser scrolls the list
+     to the top to follow it; the hook then reads that as the user scrolling up and stops. */
+  overflow-anchor: none;
 }
